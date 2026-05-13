@@ -1,0 +1,39 @@
+# 数据采集
+websockets>=12.0
+aiohttp>=3.9
+python-binance>=1.0.19
+
+# 指标计算
+pandas>=2.2
+numpy>=1.26
+pandas-ta>=0.3.14b
+ta-lib>=0.4.28
+
+# AI 引擎
+openai>=1.30
+anthropic>=0.28
+pydantic>=2.7
+jinja2>=3.1
+
+# 消息队列 / 存储
+redis>=5.0
+psycopg2-binary>=2.9
+influxdb-client>=1.43
+
+# 市场制度识别
+hmmlearn>=0.3
+scikit-learn>=1.4
+
+# 回测 / 统计
+statsmodels>=0.14
+scipy>=1.13
+
+# 可观测性
+prometheus-client>=0.20
+structlog>=24.1
+
+# 工具
+python-dotenv>=1.0
+pyyaml>=6.0
+click>=8.1
+rich>=13.7

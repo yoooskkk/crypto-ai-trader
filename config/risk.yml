@@ -1,0 +1,16 @@
+# 风险参数配置
+circuit_breaker:
+  max_daily_drawdown_pct: 5.0
+  equity_floor_usd: 0
+  max_consecutive_losses: 5
+  cool_down_hours: 4
+
+exposure:
+  max_total_pct: 80.0
+  max_single_position_pct: 20.0
+  max_correlated_pairs: 3
+
+signal:
+  min_confidence: 0.65
+  require_regime_match: true
+  ai_override_freqtrade: false

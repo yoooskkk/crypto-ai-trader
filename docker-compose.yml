@@ -1,0 +1,122 @@
+version: "3.9"
+
+services:
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - ./infra/redis/redis.conf:/usr/local/etc/redis/redis.conf
+      - redis_data:/data
+    command: redis-server /usr/local/etc/redis/redis.conf
+    networks: [internal]
+
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+      POSTGRES_DB: trading
+    secrets: [db_password]
+    volumes:
+      - ./infra/timescaledb/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - tsdb_data:/var/lib/postgresql/data
+    networks: [internal]
+
+  influxdb:
+    image: influxdb:2.7-alpine
+    restart: unless-stopped
+    volumes:
+      - influx_data:/var/lib/influxdb2
+    networks: [internal]
+
+  data-collector:
+    build: .
+    command: python -m data.ws_client
+    restart: unless-stopped
+    env_file: .env
+    depends_on: [redis]
+    networks: [internal, external]
+
+  indicator-worker:
+    build: .
+    command: python -m messaging.consumer --group indicators
+    restart: unless-stopped
+    env_file: .env
+    depends_on: [redis, timescaledb]
+    networks: [internal]
+
+  regime-worker:
+    build: .
+    command: python -m messaging.consumer --group regime
+    restart: unless-stopped
+    env_file: .env
+    depends_on: [redis]
+    networks: [internal]
+
+  ai-engine:
+    build: .
+    command: python -m messaging.consumer --group ai_engine
+    restart: unless-stopped
+    env_file: .env
+    secrets: [llm_api_key, binance_api_key]
+    depends_on: [redis]
+    networks: [internal]
+
+  risk-guardian:
+    build: .
+    command: python -m risk_guardian.circuit_breaker
+    restart: unless-stopped
+    env_file: .env
+    depends_on: [redis, ai-engine]
+    networks: [internal]
+
+  freqtrade:
+    image: freqtradeorg/freqtrade:stable
+    restart: unless-stopped
+    volumes:
+      - ./freqtrade_strategies:/freqtrade/user_data/strategies
+      - ./freqtrade_strategies/user_data:/freqtrade/user_data
+      - ./freqtrade_strategies/config.json:/freqtrade/config.json
+    secrets: [binance_api_key, binance_api_secret]
+    depends_on: [risk-guardian]
+    networks: [internal, external]
+
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./observability/prometheus/rules.yml:/etc/prometheus/rules.yml
+      - prom_data:/prometheus
+    networks: [internal]
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    volumes:
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards
+      - grafana_data:/var/lib/grafana
+    networks: [internal]
+
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt
+  llm_api_key:
+    file: ./secrets/llm_api_key.txt
+  binance_api_key:
+    file: ./secrets/binance_api_key.txt
+  binance_api_secret:
+    file: ./secrets/binance_api_secret.txt
+
+networks:
+  internal:
+    internal: true
+  external: {}
+
+volumes:
+  redis_data:
+  tsdb_data:
+  influx_data:
+  prom_data:
+  grafana_data:

@@ -1,0 +1,27 @@
+# 指标参数配置
+trend:
+  ema_periods: [9, 21, 55, 200]
+  sma_periods: [20, 50, 200]
+  macd: {fast: 12, slow: 26, signal: 9}
+  adx_period: 14
+
+momentum:
+  rsi_period: 14
+  roc_period: 10
+  cci_period: 20
+  stoch: {k: 14, d: 3, smooth_k: 3}
+
+volatility:
+  atr_period: 14
+  stddev_period: 20
+  bbands: {period: 20, std: 2}
+
+volume:
+  mfi_period: 14
+  cmf_period: 20
+  vol_ratio_period: 20
+
+crypto_alpha:
+  funding_rate_source: binance
+  oi_delta_period: 24   # 小时
+  cvd_lookback: 100
