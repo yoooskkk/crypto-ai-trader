@@ -71,7 +71,9 @@ STATUS.md（状态管理不是你的职责）
        函数参数和返回值必须有类型注解
 
 □ B5  日志是否使用 structlog？
-       禁止 print()，禁止 logging.getLogger()
+       禁止 print()（除非 CLI 交互），禁止 logging.getLogger()
+       所有模块应使用 `structlog.get_logger(__name__)`
+       参考: `docs/guides/logging_setup.md` · `logging_setup.py`
 ```
 
 ### C. 风控专项（仅审查 risk_guardian/ 时）

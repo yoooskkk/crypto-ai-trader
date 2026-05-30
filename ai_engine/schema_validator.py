@@ -23,6 +23,7 @@ class TradePlan(BaseModel):
     reasoning:   str          = Field(min_length=20)
     regime:      str          = "unknown"
     timeframe:   str          = "1h"
+    score:       float        = 0.0  # 由 signal_scorer 填充
 
     @field_validator("stop_loss")
     @classmethod

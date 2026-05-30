@@ -90,6 +90,7 @@
 | config/indicators.yml 缺少 timeseries 段，timeseries.py 使用默认参数运行并记录 warning | 低 | ROLE_INDICATORS |
 | indicators/trend.py / reconnect_guard.py / gap_filler.py / circuit_breaker.py / llm_client.py 等仍使用 logging 而非 structlog | 低 | ROLE_REVIEWER |
 | 项目缺少统一的日志初始化入口（现已在 logging_setup.py 中提供）| 低 | ROLE_DATA |
+| `docs/guides/logging_setup.md` 包含了开发日志使用的完整说明 | — | ROLE_DATA |
 
 | crypto_alpha.py 依赖 aiohttp 调用 Binance Futures API，需在生产环境配置代理或白名单 | 中 | ROLE_INFRA |
 | regime/hmm_model.py 缓存路径 data/historical/ 需在 .gitignore 中添加 | 低 | ROLE_INFRA |
