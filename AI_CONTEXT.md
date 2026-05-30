@@ -469,6 +469,20 @@ A: 1) 在 `data/` 下新建采集文件 2) 用 `StreamProducer` 写入新的Stre
 
 ---
 
+## 10. 禁止清单（AI 绝对不能做的事）
+- 禁止在任何模块中直接调用 Freqtrade API（除 risk_guardian）
+- 禁止将密钥打印到 structlog 的任何字段
+- 禁止在 factor_mining.py 中引入 validate/ 或 oos/ 路径
+- 禁止修改 Stream 名称常量（会悄无声息地破坏消费者）
+- 禁止在 LLM 输出未经 schema_validator 时直接触发订单
+
+---
+
+## 11. 变更影响矩阵
+修改 redis_stream.py 中的 Stream 名 → 影响所有生产者和消费者
+修改 TradePlan schema → 影响 schema_validator / plan_generator / strategy_adapter
+修改 risk.yml 熔断阈值 → 需要同步更新对应测试用例
+
 *最后更新：系统架构设计阶段完成，进入模块实现阶段*
 *本文件由开发者/AI协作维护，每次迭代后更新第6节*
 
