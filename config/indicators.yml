@@ -21,6 +21,12 @@ volume:
   cmf_period: 20
   vol_ratio_period: 20
 
+math_factors:
+  log_return_period: 1         # 对数收益率滞后阶数
+  zscore_period: 20            # Z-Score 滚动窗口
+  rank_period: 20              # 百分位排名窗口
+  abs_return_period: 1         # 绝对收益率滞后阶数
+
 crypto_alpha:
   funding_rate_source: binance
   oi_delta_period: 24   # 小时

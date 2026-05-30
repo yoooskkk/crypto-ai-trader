@@ -9,10 +9,15 @@
 
 | 模块文件 | 完成程度 | 备注 |
 |---------|---------|------|
-| `data/ws_client.py` | 框架完成 | 基本框架，可继续完善 |
+| `data/ws_client.py` | ✅ 完整 | 已完善 structlog + K 线字段标准化 |
 | `data/reconnect_guard.py` | ✅ 完整 | |
 | `data/data_validator.py` | ✅ 完整 | |
 | `data/gap_filler.py` | ✅ 完整 | |
+| `data/rest_client.py` | ✅ 完整 | Binance 现货+合约 REST 封装，24hr Ticker + 排名 |
+| `data/market_selector.py` | ✅ 完整 | MarketSelector 交互式+编程式币种选择 |
+| `data/news_scraper.py` | ✅ 完整 | CryptoPanic 新闻抓取 + Redis 存储 |
+| `data/sentiment_feed.py` | ✅ 完整 | Fear & Greed 指数获取 + Redis 存储 |
+| `tests/test_rest_client.py` | ✅ 完整 | 24 个测试覆盖 K 线/Ticker/错误/重试/资源管理 |
 | `messaging/redis_stream.py` | ✅ 完整 | |
 | `messaging/backpressure.py` | ✅ 完整 | |
 | `regime/detector.py` | ✅ 完整（规则方法）| HMM 方法尚未实现 |
@@ -35,9 +40,9 @@
 | `indicators/timeseries.py` | ✅ 完整 | DELAY+DELTA+TS_MAX/MIN/RANK/ZSCORE+CORR |
 | `indicators/cache_manager.py` | ✅ 完整 | 慢周期缓存 + TTL 管理，序列化/反序列化 |
 | `regime/strategy_switcher.py` | ✅ 完整 | 制度→风险参数映射表，带备份的 risk.yml 动态更新 |
-| `regime/strategy_switcher.py` | ✅ 完整 | 制度→风险参数映射，带备份的 risk.yml 动态更新 |
 | `indicators/crypto_alpha.py` | ✅ 完整 | FUNDING_RATE(Binance API)、OI_DELTA(24h)、CVD_DELTA(100bar) |
 | `regime/hmm_model.py` | ✅ 完整 | 5 维特征（自实现，无 pandas_ta 依赖）+ GaussianHMM 训练/推理 + 自动制度映射 + RuleBased 降级 |
+| `indicators/math_factors.py` | ✅ 完整 | LOG_RETURN+ZSCORE+RANK+SIGN+ABS_RETURN，纯 pandas/numpy 实现 |
 ---
 
 ## 待开发模块
@@ -68,8 +73,8 @@
 
 | 模块文件 | 负责角色 | 状态 |
 |---------|---------|------|
-| `ui/cli/coin_selector.py` | ROLE_DATA | 待创建 |
-| `ui/cli/timeframe_picker.py` | ROLE_DATA | 待创建 |
+| `ui/cli/coin_selector.py` | ROLE_DATA | ✅ 已完成 |
+| `ui/cli/timeframe_picker.py` | ROLE_DATA | ✅ 已完成 |
 | `ui/cli/indicator_panel.py` | ROLE_INDICATORS | 待创建 |
 
 ---
@@ -83,11 +88,13 @@
 | Freqtrade force_exit API 调用方式需验证版本兼容性 | 高 | ROLE_RISK |
 | detector.py 的 Regime 枚举值小写 "trending" vs STREAM_SCHEMA.md 大写 "TRENDING" | 低 | ROLE_INDICATORS |
 | config/indicators.yml 缺少 timeseries 段，timeseries.py 使用默认参数运行并记录 warning | 低 | ROLE_INDICATORS |
-| indicators/trend.py 仍使用 logging 而非 structlog（与 ARCH.md 规范不一致） | 低 | ROLE_REVIEWER |
-| indicators/math_factors.py 为 TODO 但不在 ROLE_INDICATORS.md 清单中，需确认保留或删除 | 低 | 人类决策 |
+| indicators/trend.py / reconnect_guard.py / gap_filler.py / circuit_breaker.py / llm_client.py 等仍使用 logging 而非 structlog | 低 | ROLE_REVIEWER |
+| 项目缺少统一的日志初始化入口（现已在 logging_setup.py 中提供）| 低 | ROLE_DATA |
+
 | crypto_alpha.py 依赖 aiohttp 调用 Binance Futures API，需在生产环境配置代理或白名单 | 中 | ROLE_INFRA |
 | regime/hmm_model.py 缓存路径 data/historical/ 需在 .gitignore 中添加 | 低 | ROLE_INFRA |
 | regime/hmm_model.py 训练需 aiohttp，目前为延迟导入（lazy import） | 低 | ROLE_INDICATORS |
+
 ---
 
 ## 更新记录
@@ -98,6 +105,11 @@
 | 2025-05-30 | indicators/ P1 全部 5 个模块 + regime/strategy_switcher.py 实现完成 | ROLE_INDICATORS |
 | 2025-05-30 | regime/strategy_switcher.py + indicators/crypto_alpha.py 完成 | ROLE_INDICATORS |
 | 2025-05-30 | regime/hmm_model.py 完成，P2 全部结束 | ROLE_INDICATORS |
+| 2025-05-30 | indicators/math_factors.py 完成（原 TODO stub），已加入 config/indicators.yml 配置段 | ROLE_INDICATORS |
+| 2025-05-30 | data/rest_client.py / market_selector.py / news_scraper.py / sentiment_feed.py 完成 | ROLE_DATA |
+| 2025-05-30 | ui/cli/coin_selector.py / timeframe_picker.py 完成 | ROLE_DATA |
+| 2025-05-30 | data/ws_client.py 完善（structlog + Binance K 线字段映射）| ROLE_DATA |
+| 2025-05-30 | tests/test_rest_client.py 完成（24 测试全部通过）| ROLE_DATA |
 ---
 
 
