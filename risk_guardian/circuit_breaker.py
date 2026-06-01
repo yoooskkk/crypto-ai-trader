@@ -38,12 +38,15 @@ class CircuitBreaker:
             self._today = today
         if self._day_start_eq == 0:
             self._day_start_eq = current_equity
+        # 先检查 equity floor（即使 _day_start_eq 刚初始化）
+        if self.equity_floor and current_equity < self.equity_floor:
+            self._trip(f"Equity {current_equity:.2f} below floor {self.equity_floor:.2f}")
+            return
+        if self._day_start_eq == 0:
             return
         dd = (self._day_start_eq - current_equity) / self._day_start_eq * 100
         if dd >= self.max_daily_dd:
             self._trip(f"Daily drawdown {dd:.2f}% >= {self.max_daily_dd}%")
-        if self.equity_floor and current_equity < self.equity_floor:
-            self._trip(f"Equity {current_equity:.2f} below floor {self.equity_floor:.2f}")
 
     def record_trade(self, pnl: float) -> None:
         if pnl < 0:
@@ -64,3 +67,4 @@ class CircuitBreaker:
         if self.state != BreakerState.OPEN:
             self.state = BreakerState.OPEN
             logger.critical("CIRCUIT BREAKER OPEN: %s", reason)
+

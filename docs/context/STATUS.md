@@ -24,7 +24,13 @@
 | `ai_engine/llm_client.py` | ✅ 完整 | |
 | `ai_engine/schema_validator.py` | ✅ 完整 | |
 | `ai_engine/prompt_versioner.py` | ✅ 完整 | |
-| `risk_guardian/circuit_breaker.py` | ✅ 完整 | |
+| `risk_guardian/circuit_breaker.py` | ✅ 完整 | 含熔断器与仲裁器集成测试 |
+| `risk_guardian/drawdown_limit.py` | ✅ 完整 | 日/周/月分级回撤追踪 + 从 risk.yml 加载 |
+| `risk_guardian/exposure_monitor.py` | ✅ 完整 | 多持仓汇总 + API 异常优雅处理 |
+| `risk_guardian/position_sizer.py` | ✅ 完整 | Kelly 公式 + 制度乘数 + 最小仓位阈值 |
+| `risk_guardian/signal_arbiter.py` | ✅ 完整 | 仲裁规则 + audit_id + Stream 消息输出 |
+| `freqtrade_strategies/AiSignalStrategy.py` | ✅ 完整 | load_signal_from_payload 无需 freqtrade 可独立导入 |
+| `tests/test_risk_guardian.py` | ✅ 完整 | 54 测试覆盖 6 个模块（全部通过）|
 | `validation/output_schema.py` | ✅ 完整 | |
 | `security/secrets_loader.py` | ✅ 完整 | |
 | `observability/decision_logger.py` | 框架完成 | 写入逻辑待完善 |
@@ -63,12 +69,7 @@
 
 ### 优先级 P1（数据流核心路径）
 
-| 模块文件 | 负责角色 | 状态 |
-|---------|---------|------|
-| `risk_guardian/exposure_monitor.py` | ROLE_RISK | stub 存在 |
-| `risk_guardian/signal_arbiter.py` | ROLE_RISK | stub 存在 |
-| `risk_guardian/position_sizer.py` | ROLE_RISK | stub 存在 |
-| `freqtrade_strategies/AiSignalStrategy.py` | ROLE_RISK | stub 存在 |
+_全部 P1 模块已完成 ✅_
 
 ### 优先级 P2（增强功能）
 
@@ -120,6 +121,7 @@
 | 2025-05-30 | tests/test_rest_client.py 完成（24 测试全部通过）| ROLE_DATA |
 | 2025-05-30 | analysis/ P1（multi_tf_trend + prompt_builder）+ ai_engine/ P1 全部 4 模块（plan_generator/signal_scorer/strategy_adapter/fallback_handler）完成，55 测试全部通过，Prompt 版本已注册（market_analysis=f0086a27, trade_plan=d91dabb4）| ROLE_ANALYSIS |
 | 2025-05-30 | analysis/ P2（factor_mining + news_integrator）+ P3（pnl_attribution）完成，39 测试全部通过 | ROLE_ANALYSIS |
+| 2025-06-01 | risk_guardian/ P1 全部 5 模块（circuit_breaker/drawdown_limit/exposure_monitor/position_sizer/signal_arbiter）+ freqtrade_strategies/AiSignalStrategy + test_risk_guardian.py 完成，54 测试全部通过 ✅ | ROLE_RISK |
 ---
 
 

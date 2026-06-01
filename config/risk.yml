@@ -14,3 +14,9 @@ signal:
   min_confidence: 0.65
   require_regime_match: true
   ai_override_freqtrade: false
+
+drawdown_limits:
+  daily_max_pct: 5.0
+  weekly_max_pct: 10.0
+  monthly_max_pct: 15.0
+  recovery_half_days: 3
