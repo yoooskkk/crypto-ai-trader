@@ -11,7 +11,7 @@
 """
 from __future__ import annotations
 
-import logging
+import structlog
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -21,7 +21,7 @@ import pandas as pd
 import pandas_ta as ta
 import yaml
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 # 配置文件路径：优先使用环境变量 CONFIG_DIR，否则使用项目根目录下的 config
 _CONFIG_DIR = Path(os.environ.get("CONFIG_DIR", Path(__file__).parent.parent / "config"))

@@ -27,7 +27,16 @@ math_factors:
   rank_period: 20              # 百分位排名窗口
   abs_return_period: 1         # 绝对收益率滞后阶数
 
+timeseries:
+  delay_period: 1          # 滞后阶数
+  delta_period: 1          # 差分阶数
+  ts_max_period: 20        # 滚动最大值窗口
+  ts_min_period: 20        # 滚动最小值窗口
+  ts_rank_period: 20       # 百分位排名窗口
+  ts_zscore_period: 20     # Z-Score 窗口
+  corr_period: 20          # 相关系数窗口
+
 crypto_alpha:
   funding_rate_source: binance
-  oi_delta_period: 24   # 小时
+  oi_delta_period: 24     # 小时
   cvd_lookback: 100

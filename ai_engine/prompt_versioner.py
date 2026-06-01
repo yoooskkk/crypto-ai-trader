@@ -4,10 +4,10 @@ Prompt 版本管理
 """
 import hashlib
 import json
-import logging
+import structlog
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 VERSION_FILE = Path("config/llm_prompts/versions.json")
 
 

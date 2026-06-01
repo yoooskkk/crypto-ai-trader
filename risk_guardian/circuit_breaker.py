@@ -6,13 +6,13 @@
   3. 连续亏损单数超过 MAX_CONSECUTIVE_LOSSES
 熔断后：拒绝所有新开仓信号，只允许平仓
 """
-import logging
+import structlog
 import os
 from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class BreakerState(str, Enum):

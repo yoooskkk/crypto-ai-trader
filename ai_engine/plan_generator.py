@@ -132,7 +132,7 @@ class PlanGenerator:
         if raw is None:
             logger.warning("LLM 返回 None，触发降级", symbol=symbol)
             decision_logger = self._get_decision_logger()
-            decision_logger.log(
+            await decision_logger.log(
                 ts=__import__("time").time(),
                 symbol=symbol,
                 timeframe="1h",
@@ -158,7 +158,7 @@ class PlanGenerator:
         if plan is None:
             logger.warning("Schema 校验失败", symbol=symbol, prompt_version=prompt_version)
             decision_logger = self._get_decision_logger()
-            decision_logger.log(
+            await decision_logger.log(
                 ts=__import__("time").time(),
                 symbol=symbol,
                 timeframe="1h",
@@ -208,7 +208,7 @@ class PlanGenerator:
 
         # ─── 步骤 7: 记录决策 ────────────────────────────────
         decision_logger = self._get_decision_logger()
-        decision_logger.log(
+        await decision_logger.log(
             ts=__import__("time").time(),
             symbol=symbol,
             timeframe="1h",
@@ -288,7 +288,7 @@ class _DecisionLoggerProxy:
     def __init__(self, logger_impl: Any):
         self._impl = logger_impl
 
-    def log(
+    async def log(
         self,
         ts: float,
         symbol: str,
@@ -319,7 +319,7 @@ class _DecisionLoggerProxy:
             breaker_state=breaker_state,
             signal_sent=signal_sent,
         )
-        self._impl.log(record)
+        await self._impl.log(record)
 
 
 __all__ = ["PlanGenerator"]

@@ -5,11 +5,11 @@ LLM 客户端
 - 所有调用记录到 decision_logger
 """
 import asyncio
-import logging
+import structlog
 import os
 from typing import Optional
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 TIMEOUT = 30
 MAX_RETRIES = 3
@@ -26,7 +26,7 @@ class LLMClient:
                     self._call(prompt, system), timeout=TIMEOUT
                 )
             except asyncio.TimeoutError:
-                logger.warning("LLM timeout attempt %d/%d", attempt + 1, MAX_RETRIES)
+                logger.warning("LLM timeout", attempt=attempt + 1, max_retries=MAX_RETRIES)
             except Exception as exc:
                 logger.error("LLM error: %s", exc)
             await asyncio.sleep(2 ** attempt)

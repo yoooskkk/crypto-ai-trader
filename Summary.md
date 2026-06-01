@@ -439,3 +439,124 @@ tests/test_fallback_handler.py	15	✅ Pass
 tests/test_factor_mining.py	17	✅ Pass
 tests/test_news_integrator.py	11	✅ Pass
 tests/test_pnl_attribution.py	11	✅ Pass
+
+
+
+完成剩余模块的大部分开发
+
+
+The user wants a comprehensive summary of the entire conversation. Let me review everything we've done in this session and create a thorough technical summary.# Conversation Summary: Crypto AI Trader — Technical Debt & Module Completion
+
+1. Conversation Overview
+This session focused on completing the observability/decision_logger.py module (from framework stub to full async implementation), then pivoting to systematic technical debt cleanup across the codebase. The progression was:
+
+Fix STATUS.md — ui/cli/indicator_panel.py was listed only in P3 table but missing from the completed modules table. Corrected by moving all 3 CLI modules (coin_selector, timeframe_picker, indicator_panel) to the completed section.
+observability/decision_logger.py — Rewrote from a stub (TODO pass in _write_db) to a complete asyncpg-based TimescaleDB logger with connection pooling, query interface, and graceful degradation.
+Plan Generator Async Fix — _DecisionLoggerProxy.log() was sync but called the now-async DecisionLogger.log() without await. Made proxy async and added await at all 3 call sites, eliminating a RuntimeWarning.
+Technical Debt Batch 1 (3 quick fixes) — Added timeseries: config section, fixed detector.py Regime enum case, added data/historical/ to .gitignore.
+Technical Debt Batch 2 (6-file logging migration) — Replaced logging.getLogger + import logging with structlog.get_logger + import structlog in trend.py, reconnect_guard.py, gap_filler.py, circuit_breaker.py, llm_client.py, prompt_versioner.py. Also converted 3 printf-style log calls to structlog key-value format.
+2. Active Development
+Decision Logger (observability/decision_logger.py)
+Before: Stub with DecisionRecord dataclass, DecisionLogger class, _write_db as # TODO: INSERT INTO decision_log / pass
+After: Full async implementation
+connect() — Creates an asyncpg connection pool with configurable host/port/user/password/database/min_size/max_size
+close() — Gracefully closes the pool
+log(record) — Writes to both structlog (console) and TimescaleDB (if connected). Uses logger.info("DECISION", ...) for structured output + logger.debug("DECISION_RAW", payload=...) for full JSON
+_write_db(record) — Executes parameterized INSERT with 11 columns matching init.sql schema
+fetch_recent(limit, symbol, validated_only) — Dynamic SQL query with optional WHERE filters, returns list of dicts
+DecisionRecord.from_plan() — Factory method with auto-timestamp, defaults for breaker_state="CLOSED", signal_sent=False
+Graceful degradation: if asyncpg is not installed, logs to console only (no crash). DB errors are caught and logged.
+Plan Generator Fix (ai_engine/plan_generator.py)
+_DecisionLoggerProxy.log() changed from def log(...) to async def log(...) with await self._impl.log(record)
+3 call sites in PlanGenerator.generate_plan() updated to use await decision_logger.log(...)
+Config Fix (config/indicators.yml)
+Added section:
+
+Apply
+timeseries:
+  delay_period: 1
+  delta_period: 1
+  ts_max_period: 20
+  ts_min_period: 20
+  ts_rank_period: 20
+  ts_zscore_period: 20
+  corr_period: 20
+Regime Enum Fix (regime/detector.py)
+Changed from: TRENDING = "trending", RANGING = "ranging", HIGH_VOLAT = "high_volatility", UNKNOWN = "unknown"
+Changed to: TRENDING = "TRENDING", RANGING = "RANGING", HIGH_VOLAT = "HIGH_VOLATILITY", UNKNOWN = "UNKNOWN"
+This eliminates the need for .upper() calls elsewhere in the system.
+Logging Migration
+Pattern applied: import logging → import structlog, logger = logging.getLogger(__name__) → logger = structlog.get_logger(__name__)
+Additional format conversions:
+reconnect_guard.py: logger.info("Reconnecting in %.1fs", self._delay) → logger.info("Reconnecting", delay=self._delay)
+gap_filler.py: logger.warning("Gap detected %s %s: %dms", symbol, interval, gap_ms) → logger.warning("Gap detected", symbol=symbol, interval=interval, gap_ms=gap_ms)
+llm_client.py: logger.warning("LLM timeout attempt %d/%d", attempt + 1, MAX_RETRIES) → logger.warning("LLM timeout", attempt=attempt + 1, max_retries=MAX_RETRIES)
+3. Technical Stack
+Category	Technologies
+Language	Python 3.14
+Database	TimescaleDB (asyncpg)
+Logging	structlog (stdlib logging removed)
+Async	asyncio, async/await, async context managers
+Testing	pytest, unittest.mock (AsyncMock)
+Data	pandas, numpy
+Messaging	Redis Streams (planned)
+Config	YAML (config/indicators.yml, config/risk.yml)
+Infra	Docker Compose (7 services)
+Architectural decisions retained:
+
+__init__ imports structlog at module level via structlog.get_logger(__name__)
+Logger instances are structlog.get_logger(), not logging.getLogger()
+DB connections use asyncpg with connection pooling (create_pool)
+All modules prefer from __future__ import annotations for forward compatibility
+Enums use str, Enum for direct string comparison
+4. File Operations
+Files Created
+File	Purpose
+tests/test_decision_logger.py	19 tests: DecisionRecord construction, DecisionLogger init/connect/log/write_db/fetch_recent/close, SQL format validation
+_migrate_logging.py	Temporary migration script (deleted after use)
+Files Modified (in chronological order)
+File	Change
+docs/context/STATUS.md	Added CLI modules to completed table; moved P3 to "all done"; added decision_logger as ✅; updated tech debt table; added 3 update records
+observability/decision_logger.py	Complete rewrite: asyncpg pool, async log/connect/close/fetch_recent, DecisionRecord.from_plan(), structlog migration
+tests/test_decision_logger.py	Created 19 tests for decision_logger
+ai_engine/plan_generator.py	_DecisionLoggerProxy.log() made async; 3 call sites await'd
+config/indicators.yml	Added timeseries: section
+regime/detector.py	Regime enum values changed to uppercase
+.gitignore	Added data/historical/
+indicators/trend.py	logging → structlog
+data/reconnect_guard.py	logging → structlog + format change
+data/gap_filler.py	logging → structlog + format change
+risk_guardian/circuit_breaker.py	logging → structlog
+ai_engine/llm_client.py	logging → structlog + format change
+ai_engine/prompt_versioner.py	logging → structlog
+Files Referenced (read-only)
+File	Relevance
+infra/timescaledb/init.sql	decision_log table schema (11 columns)
+config/risk.yml	Risk parameter config
+docs/guides/logging_setup.md	Logging setup guide (reference)
+5. Solutions & Troubleshooting
+Problem	Resolution
+STATUS.md P3 modules not in completed table	Moved coin_selector, timeframe_picker, indicator_panel to ✅ table
+Mocking builtins.__import__ broke pytest internals	Avoided patching __import__ globally; used _MockPool / _MockAcquireContext classes instead of AsyncMock for pool context manager
+AsyncMock doesn't support async with protocol	Created custom _MockPool with acquire() returning _MockAcquireContext with __aenter__/__aexit__
+DecisionLogger.log() is async but plan_generator called it synchronously	Made _DecisionLoggerProxy.log() async + added 3 await calls
+Console encoding can't display emoji	Removed ✅ from migration script output
+PowerShell quoting conflicts with inline Python	Used separate .py script file for migration
+6. Outstanding Work
+From STATUS.md known issues (remaining):
+
+Issue	Severity	Owner
+regime/hmm_model.py needs offline training data / training script not written	Medium	ROLE_INDICATORS
+News sentiment historical data hard to get, needs mock for backtesting	Low	ROLE_ANALYSIS
+Freqtrade force_exit API call version compatibility unverified	High	ROLE_RISK
+crypto_alpha.py aiohttp dependency needs proxy/whitelist config for production	Medium	ROLE_INFRA
+Project lacks unified logging init entry point (logging_setup.py exists but not wired)	Low	ROLE_DATA
+redis_stream.py / data_validator.py — no logging calls at all (neither logging nor structlog)	Low	ROLE_REVIEWER
+regime/hmm_model.py training requires aiohttp (lazy import, handled)	Low	ROLE_INDICATORS
+Modules not yet scheduled:
+
+ui/dashboard/app.py — Web dashboard (Flask/FastAPI)
+observability/decision_logger.py — Now ✅ complete
+observability/factor_decay_monitor.py — Stub
+observability/alert_manager.py — Stub
+The user's last explicit request before the summary request was "先做技术债清理" (do technical debt cleanup first), which was completed. The next step could be ui/dashboard/app.py, HMM training script, or remaining tech debt items.

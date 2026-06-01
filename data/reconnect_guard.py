@@ -2,10 +2,10 @@
 断连重连守卫：指数退避 + 最大重试次数
 """
 import asyncio
-import logging
+import structlog
 import math
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class _Attempt:
@@ -13,7 +13,7 @@ class _Attempt:
         self._delay = min(base * (2 ** n), 60.0)
 
     async def sleep(self) -> None:
-        logger.info("Reconnecting in %.1fs", self._delay)
+        logger.info("Reconnecting", delay=self._delay)
         await asyncio.sleep(self._delay)
 
 

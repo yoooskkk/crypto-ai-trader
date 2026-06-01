@@ -12,6 +12,7 @@ freqtrade_strategies/user_data/logs/
 freqtrade_strategies/user_data/backtest_results/
 validation/datasets/oos/
 regime/models/*.pkl
+data/historical/
 *.log
 .DS_Store
 AI_CONTEXT_EN.md

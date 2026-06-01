@@ -2,10 +2,10 @@
 数据缺口补全
 WS 断连恢复后，用 REST API 补全缺失的 K 线
 """
-import logging
+import structlog
 from datetime import datetime, timezone
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class GapFiller:
@@ -23,7 +23,7 @@ class GapFiller:
         if gap_ms <= interval_ms * 1.5:
             self._last_ts[f"{symbol}_{interval}"] = current_ts
             return []
-        logger.warning("Gap detected %s %s: %dms", symbol, interval, gap_ms)
+        logger.warning("Gap detected", symbol=symbol, interval=interval, gap_ms=gap_ms)
         klines = await self.rest.get_klines(symbol, interval, start=last, end=current_ts)
         self._last_ts[f"{symbol}_{interval}"] = current_ts
         return klines

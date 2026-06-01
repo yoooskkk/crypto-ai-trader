@@ -9,10 +9,10 @@ import numpy as np
 
 
 class Regime(str, Enum):
-    TRENDING   = "trending"
-    RANGING    = "ranging"
-    HIGH_VOLAT = "high_volatility"
-    UNKNOWN    = "unknown"
+    TRENDING   = "TRENDING"
+    RANGING    = "RANGING"
+    HIGH_VOLAT = "HIGH_VOLATILITY"
+    UNKNOWN    = "UNKNOWN"
 
 
 @dataclass
