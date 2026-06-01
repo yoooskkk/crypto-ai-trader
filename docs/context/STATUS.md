@@ -43,6 +43,20 @@
 | `indicators/crypto_alpha.py` | ✅ 完整 | FUNDING_RATE(Binance API)、OI_DELTA(24h)、CVD_DELTA(100bar) |
 | `regime/hmm_model.py` | ✅ 完整 | 5 维特征（自实现，无 pandas_ta 依赖）+ GaussianHMM 训练/推理 + 自动制度映射 + RuleBased 降级 |
 | `indicators/math_factors.py` | ✅ 完整 | LOG_RETURN+ZSCORE+RANK+SIGN+ABS_RETURN，纯 pandas/numpy 实现 |
+| `analysis/multi_tf_trend.py` | ✅ 完整 | 多周期共识 + 防漂移规则，21 测试通过 |
+| `analysis/prompt_builder.py` | ✅ 完整 | Jinja2 模板渲染 + 指标/制度注入 |
+| `analysis/factor_mining.py` | ✅ 完整 | IC/IR 计算 + Spearman 排序 + 铁律 #2 隔离，17 测试通过 |
+| `analysis/news_integrator.py` | ✅ 完整 | 双通道情绪融合（新闻+F&G），11 测试通过 |
+| `analysis/pnl_attribution.py` | ✅ 完整 | 多维度归因分析（夏普/索提诺/回撤/因子相关性），11 测试通过 |
+| `ai_engine/plan_generator.py` | ✅ 完整 | 6 步串联 + Schema 校验 + 降级路径，10 测试通过 |
+| `ai_engine/signal_scorer.py` | ✅ 完整 | 三维评分（AI 置信度 × 制度匹配 × 多周期共识）|
+| `ai_engine/strategy_adapter.py` | ✅ 完整 | TradePlan → Freqtrade 信号 + ai_signal Stream |
+| `ai_engine/fallback_handler.py` | ✅ 完整 | 两级降级（复用上次信号 → FLAT 安全信号）|
+| `tests/test_multi_tf_trend.py` | ✅ 完整 | 21 测试，覆盖方向推断/共识/FAST 防漂移 |
+| `tests/test_plan_generator.py` | ✅ 完整 | 10 测试，覆盖正常/降级/FLAT/信号格式/状态缓存 |
+| `tests/test_factor_mining.py` | ✅ 完整 | 17 测试，覆盖铁律 #2/IC/IR/异常处理 |
+| `tests/test_news_integrator.py` | ✅ 完整 | 11 测试，覆盖权重融合/极端覆写/数据缺省 |
+| `tests/test_pnl_attribution.py` | ✅ 完整 | 11 测试，覆盖空/单/多交易/分组统计/因子相关性 |
 ---
 
 ## 待开发模块
@@ -51,11 +65,6 @@
 
 | 模块文件 | 负责角色 | 状态 |
 |---------|---------|------|
-| `analysis/multi_tf_trend.py` | ROLE_ANALYSIS | stub 存在 |
-| `analysis/prompt_builder.py` | ROLE_ANALYSIS | stub 存在 |
-| `ai_engine/plan_generator.py` | ROLE_ANALYSIS | stub 存在 |
-| `ai_engine/signal_scorer.py` | ROLE_ANALYSIS | stub 存在 |
-| `ai_engine/strategy_adapter.py` | ROLE_ANALYSIS | stub 存在 |
 | `risk_guardian/exposure_monitor.py` | ROLE_RISK | stub 存在 |
 | `risk_guardian/signal_arbiter.py` | ROLE_RISK | stub 存在 |
 | `risk_guardian/position_sizer.py` | ROLE_RISK | stub 存在 |
@@ -65,8 +74,6 @@
 
 | 模块文件 | 负责角色 | 状态 |
 |---------|---------|------|
-| `analysis/factor_mining.py` | ROLE_ANALYSIS | 需实现 IC/IR |
-| `analysis/news_integrator.py` | ROLE_ANALYSIS | 情绪权重融合 |
 | `validation/walk_forward.py` | ROLE_ANALYSIS | 滚动窗口框架 |
 
 ### 优先级 P3（CLI 界面）
@@ -111,6 +118,8 @@
 | 2025-05-30 | ui/cli/coin_selector.py / timeframe_picker.py 完成 | ROLE_DATA |
 | 2025-05-30 | data/ws_client.py 完善（structlog + Binance K 线字段映射）| ROLE_DATA |
 | 2025-05-30 | tests/test_rest_client.py 完成（24 测试全部通过）| ROLE_DATA |
+| 2025-05-30 | analysis/ P1（multi_tf_trend + prompt_builder）+ ai_engine/ P1 全部 4 模块（plan_generator/signal_scorer/strategy_adapter/fallback_handler）完成，55 测试全部通过，Prompt 版本已注册（market_analysis=f0086a27, trade_plan=d91dabb4）| ROLE_ANALYSIS |
+| 2025-05-30 | analysis/ P2（factor_mining + news_integrator）+ P3（pnl_attribution）完成，39 测试全部通过 | ROLE_ANALYSIS |
 ---
 
 

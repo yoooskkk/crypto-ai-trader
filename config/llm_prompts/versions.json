@@ -1,1 +1,10 @@
-{"market_analysis": {}, "trade_plan": {}}
+{
+  "market_analysis.j2": {
+    "version": "f0086a27",
+    "hash": "f0086a27"
+  },
+  "trade_plan.j2": {
+    "version": "d91dabb4",
+    "hash": "d91dabb4"
+  }
+}
