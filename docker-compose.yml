@@ -203,7 +203,8 @@ services:
     ports:
       - "127.0.0.1:8081:8080"  # 内网端口 8080（risk-guardian 通过 http://freqtrade:8080 访问），宿主机端口 8081
     volumes:
-      - ./freqtrade_strategies:/freqtrade/user_data/strategies
+      - ./freqtrade_strategies/AiSignalStrategy.py:/freqtrade/user_data/strategies/AiSignalStrategy.py
+      - ./freqtrade_strategies/__init__.py:/freqtrade/user_data/strategies/__init__.py
       - ./freqtrade_strategies/user_data:/freqtrade/user_data
       - ./freqtrade_strategies/config.json:/freqtrade/config.json
     secrets: [binance_api_key, binance_api_secret]
