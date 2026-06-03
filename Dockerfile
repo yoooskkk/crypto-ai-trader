@@ -11,21 +11,26 @@ FROM python:3.14-slim AS builder
 
 WORKDIR /build
 
-# 系统依赖（编译某些 wheel 需要）
+# 系统依赖（编译某些 wheel/扩展需要）
+# gcc/g++: hmmlearn（Cython 扩展）源码编译
+# libpq-dev: psycopg2 编译
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
+    g++ \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # 复制依赖声明
 COPY requirements.txt requirements-dev.txt ./
 
-# 安装依赖到 /install 目录（仅使用预编译 wheel，不编译源码）
-# 注: 所有指标模块已改用纯 pandas/numpy 实现，无需 pandas_ta/ta-lib/numba
-RUN pip install --only-binary :all: --no-cache-dir --prefix=/install \
+# 安装依赖到 /install 目录
+# hmmlearn（Cython 扩展）需要源码编译，不能使用 --only-binary
+# 所有指标模块已改用纯 pandas/numpy，无需 pandas_ta/ta-lib/numba
+# 编译依赖: gcc（已安装）、numpy（自动前置安装）
+RUN pip install --no-cache-dir --prefix=/install \
     -r requirements.txt \
     -r requirements-dev.txt || \
-    pip install --only-binary :all: --no-cache-dir --prefix=/install -r requirements.txt
+    pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 # ─── Stage 2: 运行时 ────────────────────────────────────────────────────
 FROM python:3.14-slim AS runtime
