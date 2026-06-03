@@ -29,7 +29,10 @@ def get_binance_key() -> tuple[str, str]:
 def get_llm_key(backend: str = "openai") -> str:
     mapping = {
         "openai":    ("llm_api_key", "OPENAI_API_KEY"),
+        "deepseek":  ("llm_api_key", "DEEPSEEK_API_KEY"),
         "anthropic": ("llm_api_key", "ANTHROPIC_API_KEY"),
     }
+    if backend not in mapping:
+        raise ValueError(f"未知 LLM 后端: {backend}。可选: {', '.join(mapping.keys())}")
     name, env = mapping[backend]
     return load_secret(name, env)

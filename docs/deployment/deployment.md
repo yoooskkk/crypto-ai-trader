@@ -185,6 +185,10 @@ curl http://localhost:8080/health
 | `MAX_DAILY_DRAWDOWN_PCT` | 否 | `5.0` | 日最大回撤阈值（%） |
 | `MAX_CONSECUTIVE_LOSSES` | 否 | `5` | 连续亏损次数触发熔断 |
 | `FREQTRADE_PASSWORD` | 见说明 | — | 如启用 Freqtrade 则为必需 |
+| `LLM_BACKEND` | 否 | `openai` | LLM 后端：`openai` / `deepseek` / `anthropic` |
+| `DEEPSEEK_API_KEY` | 见说明 | — | DeepSeek API Key（当 `LLM_BACKEND=deepseek` 时为必需）|
+| `LLM_API_BASE` | 否 | — | 自定义 OpenAI 兼容 API 的 base_url（覆盖默认）|
+| `LLM_MODEL` | 否 | — | 自定义模型名称（覆盖默认，如 `deepseek-chat`）|
 | `ALERT_TELEGRAM_BOT_TOKEN` | 否 | — | Telegram 告警通知 |
 
 完整列表见 [`docs/deployment/.env.example`](.env.example)。
@@ -214,16 +218,32 @@ mkdir -p secrets
 > - 定期轮换 API Key（建议每 90 天）
 > - 确保 `secrets/` 目录权限为 `chmod 700 secrets/`
 
-**LLM API Key 多提供商支持**：
+**LLM API Key 配置**：
+
+取决于 `LLM_BACKEND` 环境变量：
+
+| `LLM_BACKEND` | 环境变量 | 也可用 Docker Secret |
+|:--------------|:---------|:--------------------|
+| `openai` | `OPENAI_API_KEY` | `secrets/llm_api_key.txt` |
+| `deepseek` | `DEEPSEEK_API_KEY` | `secrets/llm_api_key.txt` |
+| `anthropic` | `ANTHROPIC_API_KEY` | `secrets/llm_api_key.txt` |
 
 `secrets/llm_api_key.txt` 可包含多行，每行格式 `provider=key`：
 
 ```
 openai=sk-proj-xxxxx
+deepseek=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 anthropic=sk-ant-xxxxx
 ```
 
-单行时默认用于 OpenAI。
+单行时默认用于当前 `LLM_BACKEND` 指定的提供商。
+
+**DeepSeek 特别说明**：
+- DeepSeek 使用 **OpenAI 兼容 API**，因此 `llm_client.py` 复用 OpenAI 客户端代码
+- 默认模型：`deepseek-chat`
+- 默认 base_url：`https://api.deepseek.com`
+- 如需自定义 base_url（如私有部署），设置 `LLM_API_BASE=https://your-deepseek-endpoint/v1`
+- 如需自定义模型（如 `deepseek-reasoner`），设置 `LLM_MODEL=deepseek-reasoner`
 
 ### 4.3 Docker 部署
 

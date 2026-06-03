@@ -114,6 +114,7 @@ _全部 P3 模块已完成 ✅_
 | 无端到端集成测试（全链路验证） | 创建 `test_integration_pipeline.py`：5 阶段全链路测试（raw_kline → indicators → regime → ai_engine → risk_guardian → trade_order），覆盖正向/降级/错误隔离/性能基线/资源管理/消息契约，37 测试全部通过 ✅ |
 | 无部署文档 | 创建 `docs/deployment/` 三件套：`deployment.md`（从零到生产完整步骤 + 架构图 + 升级回滚）、`operations.md`（日常运维 SOP 7 项 + 模型管理 + 性能调优）、`troubleshooting.md`（按症状分类排查手册 20+ 场景）✅ |
 | 无负载测试脚本 | 创建 `scripts/load_test.py`：4 种模式（smoke/load/stability/latency）+ JSON 输出 + Docker 容器检查 + Redis Stream 延迟测量 + `test_load_test.py` 33 测试全部通过 ✅ |
+| LLM 仅支持 OpenAI/Anthropic | `llm_client.py` 添加 `deepseek` 后端（OpenAI 兼容 API），可通过 `LLM_BACKEND=deepseek` 环境变量切换；`secrets_loader.py` 添加 DeepSeek 密钥映射；部署文档更新 DeepSeek 配置说明 ✅ |
 | detector.py 枚举值大小写不一致 | `Regime` 值改为大写（TRENDING/RANGING/HIGH_VOLATILITY/UNKNOWN）|
 | config/indicators.yml 缺少 timeseries 段 | 已添加完整配置段 |
 | 6 个文件使用 logging 而非 structlog | trend.py / reconnect_guard.py / gap_filler.py / circuit_breaker.py / llm_client.py / prompt_versioner.py 已迁移 |
