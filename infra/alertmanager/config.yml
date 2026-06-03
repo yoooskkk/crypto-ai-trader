@@ -16,16 +16,13 @@ route:
       repeat_interval: 6h
 
 receivers:
-  - name: default
-    webhook_configs:
-      - url: "${ALERT_WEBHOOK_URL}"
-        send_resolved: true
+    - name: default
+    # webhook 待配置: Alertmanager 不支持 shell 变量，需填入真实 URL
+    # webhook_configs:
+    #   - url: http://alertmanager:9093/api/v1/alerts
+    #     send_resolved: true
   - name: critical
-    webhook_configs:
-      - url: "${ALERT_CRITICAL_WEBHOOK_URL}"
   - name: warning
-    webhook_configs:
-      - url: "${ALERT_WEBHOOK_URL}"
 
 inhibit_rules:
   - source_match:
