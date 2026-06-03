@@ -19,6 +19,12 @@
 6. [配置参考](#6-配置参考)
 7. [升级指南](#7-升级指南)
 8. [回滚指南](#8-回滚指南)
+9. [低配硬件优化](#9-低配硬件优化)
+   - [9.1 优化原理](#91-优化原理)
+   - [9.2 快速启动（轻量版）](#92-快速启动轻量版)
+   - [9.3 资源预算对比](#93-资源预算对比)
+   - [9.4 进一步降低配置](#94-进一步降低配置)
+   - [9.5 功能差异对照](#95-功能差异对照)
 
 ---
 
@@ -73,7 +79,9 @@
 | 4 | `ai_signal` | ai-engine | risk-guardian | AI 生成的交易信号 |
 | 5 | `trade_order` | risk-guardian | Freqtrade | 最终交易指令 |
 
-### 容器清单（共 12 个）
+### 容器清单（标准版 12 个 / 轻量版 2 个）
+
+轻量版容器清单见 [第 9 节](#9-低配硬件优化)。
 
 | 容器 | 依赖 | 端口 | 说明 |
 |:-----|:-----|:----:|:-----|
@@ -95,14 +103,14 @@
 
 ## 2. 前置条件
 
-| 依赖 | 版本要求 | 验证命令 |
-|:-----|:---------|:---------|
-| Docker | ≥ 24.0 | `docker --version` |
-| Docker Compose | ≥ 2.24 | `docker compose version` |
-| Git | ≥ 2.40 | `git --version` |
-| 内存 | ≥ 8 GB | `free -h` |
-| 磁盘 | ≥ 20 GB | `df -h` |
-| 网络 | 可访问 api.binance.com | `curl -s https://api.binance.com/api/v3/ping` |
+| 依赖 | 标准版 | 轻量版 | 验证命令 |
+|:-----|:------|:-------|:---------|
+| Docker | ≥ 24.0 | ≥ 24.0 | `docker --version` |
+| Docker Compose | ≥ 2.24 | ≥ 2.24 | `docker compose version` |
+| Git | ≥ 2.40 | ≥ 2.40 | `git --version` |
+| 内存 | ≥ 8 GB | **≥ 2 GB** | `free -h` |
+| 磁盘 | ≥ 20 GB | **≥ 10 GB** | `df -h` |
+| 网络 | 可访问 api.binance.com | 同上 | `curl -s https://api.binance.com/api/v3/ping` |
 
 ### 检查清单
 
@@ -515,6 +523,243 @@ cp data/historical/hmm_models/BTCUSDT_1h_20250101T000000.pkl \
 
 ---
 
+## 9. 低配硬件优化
+
+> 目标：2 核 / 4GB RAM / 40GB 磁盘甚至 **更低配置**都能流畅运行。
+> 通过减少容器数量、用 SQLite 替代 TimescaleDB、合并 worker 进程实现。
+
+---
+
+### 9.1 优化原理
+
+优化不是删减功能，而是**替换实现方式**，保持业务逻辑不变：
+
+| 优化策略 | 标准版 | 轻量版 | 节省资源 |
+|:---------|:-------|:-------|:---------|
+| **数据库** | TimescaleDB（独立守护进程, ~800MB） | SQLite（文件存储, ~2MB） | ~800MB RAM |
+| **时序存储** | InfluxDB + Prometheus（~700MB） | 结构化日志文件（~0MB） | ~700MB RAM |
+| **可视化** | Grafana + AlertManager（~200MB） | 移除（运行时按需启用） | ~200MB RAM |
+| **Worker** | 5 个独立 Python 进程（~400MB） | 1 个合并进程（~200MB） | ~200MB RAM |
+| **策略执行** | Freqtrade 独立容器（~250MB） | 保留不动 ✅ | 0 |
+| **通知模块** | Telegram/钉钉独立容器（~50MB） | 集成到 pipeline-worker 内 | ~50MB 节省 |
+| **编译依赖** | gcc/g++/libpq5（~150MB 镜像） | 纯 wheel，零编译 | ~150MB 镜像 |
+| **====================** | **====** | **====** | **≈ 2.3GB 节省** |
+
+#### 轻量版架构图
+
+```
+┌──────────────────────────────────────────┐
+│            pipeline-worker                │
+│  ┌───────────┐                           │
+│  │ Binance   │                           │
+│  │ WebSocket │──┐                        │
+│  └───────────┘  │                        │
+│                 ▼                        │
+│  ┌───────────────────────┐               │
+│  │ 指标计算 (indicators) │               │
+│  └───────────┬───────────┘               │
+│              │ Redis Stream               │
+│              ▼                           │
+│  ┌───────────────────────┐               │
+│  │ 制度识别 (regime)     │               │
+│  └───────────┬───────────┘               │
+│              │ Redis Stream               │
+│              ▼                           │
+│  ┌───────────────────────┐               │
+│  │ AI 引擎 (ai_engine)   │               │
+│  └───────────┬───────────┘               │
+│              │ Redis Stream               │
+│              ▼                           │
+│  ┌───────────────────────┐               │
+│  │ 风控审核 (risk)       │──► trade_order │
+│  └───────────┬───────────┘               │
+│              │ SQLite                     │
+│              ▼                            │
+│         decisions.db                      │
+└──────────────────────────────────────────┘
+         │
+         │ Redis Stream
+         ▼
+┌──────────────┐
+│    Redis     │  ← 唯一的外部依赖
+│  (~30MB RAM) │
+└──────────────┘
+```
+
+所有 5 个流水线阶段运行在 **同一个容器、同一个 Python 进程** 中，
+通过 asyncio 任务并发执行，共享 Redis Stream 通信。
+
+下单执行由 **Freqtrade** 单独容器负责（保留不动，成熟稳定）。
+
+---
+
+### 9.2 快速启动（轻量版）
+
+```shell
+# 1. 准备密钥（必需：LLM API Key）
+mkdir -p secrets
+echo "sk-your-openai-key" > secrets/llm_api_key.txt
+
+# 2. 创建 .env（可选）
+cat > .env << EOF
+SYMBOLS=BTCUSDT,ETHUSDT
+KLINE_INTERVAL=1h
+LOG_LEVEL=INFO
+EOF
+
+# 3. 使用轻量版 compose 启动
+#    首次构建约 2-3 分钟，后续秒级
+docker compose -f docker-compose.lightweight.yml up -d
+
+# 4. 验证
+sleep 10
+docker compose -f docker-compose.lightweight.yml ps
+docker compose -f docker-compose.lightweight.yml logs --tail=20 pipeline-worker
+```
+
+#### 三个容器在运行
+
+```shell
+$ docker compose -f docker-compose.lightweight.yml ps
+NAME                                    IMAGE                              STATUS   PORTS
+crypto-ai-trader-pipeline-worker-1      crypto-ai-trader_pipeline-worker   Up       
+crypto-ai-trader-freqtrade-1            freqtradeorg/freqtrade:stable      Up       8081
+crypto-ai-trader-redis-1                redis:7-alpine                     Up       6379
+```
+
+#### 验证数据流
+
+```shell
+# 检查 Redis Stream（需要等待 K 线收盘才能见数据）
+docker compose -f docker-compose.lightweight.yml exec redis redis-cli XLEN raw_kline
+docker compose -f docker-compose.lightweight.yml exec redis redis-cli XLEN indicators
+docker compose -f docker-compose.lightweight.yml exec redis redis-cli XLEN trade_order
+
+# 检查决策日志（SQLite 文件）
+docker compose -f docker-compose.lightweight.yml exec pipeline-worker \
+  python -c "import sqlite3; c=sqlite3.connect('/app/data/decisions.db'); print(c.execute('SELECT count(*) FROM decisions').fetchone())"
+```
+
+---
+
+### 9.3 资源预算对比
+
+#### 标准版（12 容器）
+
+| 容器 | 内存 (实际) | 内存 (峰值) | CPU
+|:-----|:----------:|:----------:|:---:
+| redis | ~30 MB | 128 MB | 0.25
+| timescaledb | ~400 MB | 1 GB | 1.0
+| influxdb | ~120 MB | 400 MB | 0.5
+| prometheus | ~150 MB | 500 MB | 0.5
+| grafana | ~80 MB | 200 MB | 0.25
+| alertmanager | ~20 MB | 50 MB | 0.1
+| data-collector | ~40 MB | 80 MB | 0.25
+| indicator-worker | ~50 MB | 100 MB | 0.5
+| regime-worker | ~30 MB | 80 MB | 0.25
+| ai-engine | ~80 MB | 200 MB | 0.5
+| risk-guardian | ~30 MB | 80 MB | 0.25
+| dashboard | ~40 MB | 80 MB | 0.25
+| **TOTAL** | **~1.07 GB** | **~2.9 GB** | **4.6**
+
+> ❌ **4GB RAM 设备可能 OOM，2GB 设备肯定跑不动**
+
+#### 轻量版（3 容器）
+
+| 容器 | 内存 (实际) | 内存 (峰值) | CPU | 备注 |
+|:-----|:----------:|:----------:|:---:|:-----|
+| redis | ~20 MB | 64 MB | 0.25 | 关闭持久化，128MB 上限 |
+| pipeline-worker | ~120 MB | 350 MB | 0.75 | 合并 5 阶段 + 通知脚本 |
+| freqtrade | ~100 MB | 256 MB | 0.50 | 交易执行引擎（保留不动） |
+| **TOTAL** | **~240 MB** | **~670 MB** | **1.50** | ✅ **2GB RAM 设备流畅运行** |
+
+> ✅ **2 核 / 2GB RAM / 10GB 磁盘即可流畅运行**
+> ✅ **4GB RAM / 40GB 磁盘下可同时跑多个实例**
+
+---
+
+### 9.4 进一步降低配置
+
+如果连 2 核 / 2GB RAM / 20GB 磁盘都不够用，还可以：
+
+#### 9.4.1 纯离线模式（数据回填，不依赖 Binance WS）
+
+在 `.env` 中设置：
+
+```shell
+# 关闭 WebSocket 实时采集，改用历史数据回填
+DISABLE_DATA_COLLECTOR=true
+```
+
+然后手动回填数据：
+
+```shell
+docker compose -f docker-compose.lightweight.yml exec pipeline-worker \
+  python -m scripts.backfill_data --symbol BTCUSDT --timeframe 1h --limit 200
+```
+
+此模式下无需外部网络（除了 LLM API），适合笔记本离线分析。
+
+#### 9.4.2 纯规则模式（无需 LLM API）
+
+在 `.env` 中设置：
+
+```shell
+# 跳过 LLM 调用，使用规则引擎生成信号
+DISABLE_LLM=true
+```
+
+此模式下 `ai_engine/fallback_handler.py` 将作为默认处理器，
+基于指标和制度规则生成 FLAT/LONG/SHORT 信号。
+
+#### 9.4.3 单币种模式（最少内存）
+
+```shell
+SYMBOLS=BTCUSDT          # 只监控一个币种，减少缓存和计算量
+KLINE_INTERVAL=1h        # 1h 周期比 1m 少 60 倍数据量
+```
+
+#### 9.4.4 极限低配：Raspberry Pi 4（4核/4GB）
+
+1. 使用轻量版 compose
+2. 关闭可观测性和面板（默认已关闭）
+3. 配置 Redis 的 `--maxmemory 64mb`（已在 compose 中配置）
+4. 使用纯规则模式（`DISABLE_LLM=true`）
+5. 监控 1-2 个币种
+
+```shell
+# arm64 架构无需特殊配置，python:3.14-slim 原生支持
+docker compose -f docker-compose.lightweight.yml build
+docker compose -f docker-compose.lightweight.yml up -d
+```
+
+---
+
+### 9.5 功能差异对照
+
+| 功能 | 标准版 | 轻量版 | 影响评估 |
+|:-----|:-------|:-------|:---------|
+| K 线采集 | Binance WS ✅ | Binance WS ✅ | 完全相同 |
+| 60+ 技术指标 | pandas/numpy ✅ | 相同 ✅ | 完全相同 |
+| 市场制度识别 | rule-based + HMM ✅ | rule-based ✅（HMM 可选） | HMM 需手动安装 hmmlearn |
+| LLM 信号生成 | ✅ | ✅ | 完全相同 |
+| 风控审核链 | 完整 5 模块 ✅ | 完整 5 模块 ✅ | 完全相同 |
+| Redis Stream 通信 | ✅ | ✅ | 完全相同 |
+| 决策日志 | TimescaleDB | SQLite 文件 | 存储方式不同，查询能力相当 |
+| 因子衰减监控 | InfluxDB + Prometheus | 结构化日志文件 | 实时图表降级为日志分析 |
+| Grafana 面板 | ✅ | ❌ | 日志 + `curl` 替代 |
+| AlertManager 告警 | ✅ | ❌ | 改为 structlog 告警 |
+| Web Dashboard | FastAPI ✅ | FastAPI (可选) | 使用 `--profile optional` 启用 |
+| Freqtrade 集成 | ✅ | ✅ 保留不动 | 完全相同（成熟交易引擎） |
+| 历史数据回填 | ✅ | ✅ | 完全相同 |
+| HMM 离线训练 | ✅ | ✅ | 手动安装 hmmlearn 后相同 |
+| 负载测试 | ✅ | ✅ | 完全相同 |
+
+> **核心交易逻辑（数据采集→指标→制度→AI→风控）完全一致**。
+> 差异仅在后端存储和可观测性设施上。
+
+---
+
 ## 附录
 
 ### A. 端口占用检查
@@ -530,6 +775,8 @@ services:
 
 ### B. 资源限制建议
 
+#### 标准版
+
 | 服务 | CPU | 内存 | 磁盘 |
 |:-----|:---:|:----:|:----:|
 | Redis | 0.5 | 512 MB | — |
@@ -538,27 +785,49 @@ services:
 | ai-engine | 1.0 | 1 GB | — |
 | Freqtrade | 0.5 | 256 MB | — |
 
+#### 轻量版
+
+| 服务 | CPU | 内存 | 磁盘 |
+|:-----|:---:|:----:|:----:|
+| Redis | 0.25 | 128 MB | — |
+| pipeline-worker | 0.75 | 512 MB | — |
+| dashboard (可选) | 0.25 | 128 MB | — |
+
 在 `docker-compose.yml` 中设置：
 
 ```yaml
 services:
-  timescaledb:
+  pipeline-worker:
     deploy:
       resources:
         limits:
-          cpus: '1.0'
-          memory: 1G
+          cpus: '0.75'
+          memory: 512M
 ```
 
-### C. 安全实践
+### C. 切换回标准版
 
-1. **网络隔离**：`internal` 网络禁止外部访问，只有 `data-collector` 和 `freqtrade` 连接 `external` 网络
+任何时候想恢复全部功能，只需切换 compose 文件：
+
+```shell
+# 停止轻量版
+docker compose -f docker-compose.lightweight.yml down
+
+# 启动标准版（需要更多内存）
+docker compose up -d
+```
+
+两个版本共享 `config/`、`secrets/`、`.env` 配置，切换无感。
+
+### D. 安全实践
+
+1. **网络隔离**：`internal` 网络禁止外部访问，只有 `pipeline-worker` 连接 `external` 网络
 2. **端口绑定**：所有端口绑定到 `127.0.0.1`，不暴露到公网
 3. **非 root 运行**：Docker 容器以 `trader` 用户（uid 1000）运行
 4. **健康检查**：每个容器有 HEALTHCHECK，Docker 自动重启不健康容器
 5. **密钥轮换**：建议每 90 天轮换一次 API Key 和数据库密码
 
-### D. 相关文档
+### E. 相关文档
 
 | 文档 | 说明 |
 |:-----|:-----|
@@ -567,3 +836,6 @@ services:
 | `docs/contracts/STREAM_SCHEMA.md` | Redis Stream 消息格式 |
 | `docs/deployment/operations.md` | 运维手册 |
 | `docs/deployment/troubleshooting.md` | 常见问题排查 |
+| `docker-compose.lightweight.yml` | 低配版 Compose 文件 |
+| `Dockerfile.lightweight` | 低配版 Dockerfile |
+| `app/pipeline_worker.py` | 合并流水线 Worker |

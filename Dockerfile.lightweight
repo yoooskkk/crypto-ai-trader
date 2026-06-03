@@ -1,0 +1,69 @@
+# =============================================================================
+# crypto-ai-trader — 轻量版多阶段构建（低配硬件优化版）
+# =============================================================================
+# 目标: 2 核 / 4GB RAM / 40GB 磁盘甚至更低配置都能流畅运行
+# 差异: 
+#   - 移除 TimescaleDB/InfluxDB/Prometheus/Grafana 客户端依赖
+#   - 移除 libpq5 / psycopg2 等 PostgreSQL 编译依赖
+#   - 移除 hmmlearn 编译依赖（gcc/g++）
+#   - 使用纯 numpy/pandas 指标计算，零 C 扩展编译
+#   - 镜像体积从 ~800MB 降至 ~300MB
+# =============================================================================
+
+# ─── Stage 1: 依赖安装 ──────────────────────────────────────────────────
+FROM python:3.14-slim AS builder
+
+WORKDIR /build
+
+# 系统依赖（hmmlearn 需要编译，但可以 --only-binary 跳过）
+# 实际上 hmmlearn 有 wheel，不需要 gcc
+# 只安装 pip 和 wheel
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.lightweight.txt ./
+
+# 安装依赖到 /install 目录
+RUN pip install --no-cache-dir --prefix=/install \
+    -r requirements.lightweight.txt
+
+# ─── Stage 2: 运行时 ────────────────────────────────────────────────────
+FROM python:3.14-slim AS runtime
+
+# 运行时零系统依赖！无需 libpq5 / curl 等
+# 仅保留健康检查用的 curl（可选，可移除）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# 从 builder 复制依赖
+COPY --from=builder /install /usr/local
+
+# 创建非 root 用户
+RUN groupadd -g 1000 trader && \
+    useradd -m -u 1000 -g trader -s /bin/bash trader
+
+WORKDIR /app
+
+# 复制项目代码
+COPY --chown=trader:trader . .
+
+# 创建必要目录
+RUN mkdir -p /app/logs /app/secrets /app/data/historical && \
+    chown -R trader:trader /app/logs /app/secrets /app/data
+
+USER trader
+
+# 健康检查
+HEALTHCHECK --interval=60s --timeout=5s --start-period=15s --retries=3 \
+    CMD python -c "import redis; r=redis.Redis(host='redis'); r.ping()" || exit 1
+
+# 默认命令：启动合并流水线 worker
+CMD ["python", "-m", "app.pipeline_worker"]
+
+# ─── 元数据 ─────────────────────────────────────────────────────────────
+LABEL org.opencontainers.image.title="crypto-ai-trader-lightweight" \
+      org.opencontainers.image.description="AI 驱动的加密货币量化交易系统（低配硬件版）" \
+      org.opencontainers.image.version="1.0.0" \
+      org.opencontainers.image.authors="crypto-ai-trader team"

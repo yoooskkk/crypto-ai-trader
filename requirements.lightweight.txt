@@ -1,0 +1,44 @@
+# ============================================================================
+# crypto-ai-trader — 轻量版依赖（低配硬件优化版）
+# ============================================================================
+# 相比 requirements.txt 移除了:
+#   - psycopg2-binary     → 改用 aiosqlite（TimescaleDB → SQLite）
+#   - influxdb-client     → 移除 InfluxDB 依赖
+#   - prometheus-client   → 移除 Prometheus 指标暴露
+#   - anthropic           → 可选 LLM 后端，按需安装
+#   - hmmlearn            → 可选 HMM 模型，轻量版默认用 rule-based
+#   - scikit-learn        → HMM 依赖，一并移除
+#   - statsmodels         → 因子衰减分析中可选，默认降级
+#   - scipy               → 同上
+#   - python-binance      → 使用 ccxt 替代（更轻量，支持更多交易所）
+#   - click               → 改用 argparse（标准库）
+#   - rich                → 可选美化，轻量版移除
+# ============================================================================
+
+# 数据采集（使用 aiohttp 替代 python-binance，少一层封装）
+websockets>=12.0
+aiohttp>=3.9
+ccxt>=4.0
+
+# 指标计算（纯 numpy/pandas，无 C 扩展编译）
+pandas>=2.2
+numpy>=1.26
+
+# AI 引擎
+openai>=1.30
+pydantic>=2.7
+jinja2>=3.1
+
+# 消息队列
+redis>=5.0
+
+# 轻量数据库（SQLite 替代 TimescaleDB）
+aiosqlite>=0.20
+
+# 通知（Telegram/钉钉，复用 observability/alert_manager.py）
+requests>=2.31
+
+# 工具
+python-dotenv>=1.0
+pyyaml>=6.0
+structlog>=24.1

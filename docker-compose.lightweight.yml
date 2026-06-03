@@ -1,0 +1,174 @@
+# ============================================================================
+# crypto-ai-trader — 轻量版 Docker Compose（低配硬件优化版）
+# ============================================================================
+# 目标: 2 核 / 4GB RAM / 40GB 磁盘甚至更低配置流畅运行
+#
+# 优化策略:
+#   1. 合并 5 个 Python worker → 1 个 pipeline-worker（省 ~300MB 进程开销）
+#   2. 移除 TimescaleDB → SQLite（决策日志）+ Parquet（历史 K 线）（省 ~800MB）
+#   3. 移除 InfluxDB + Prometheus + Grafana + AlertManager（省 ~1GB 守护进程）
+#   4. 通知（Telegram/钉钉）集成到 pipeline-worker 内，不复用容器
+#   5. Freqtrade 保留不动——成熟交易执行引擎
+#   6. 设定 CPU/Memory 硬限制，防止 OOM 抖动
+#   7. 精简 Dockerfile（无 libpq5/gcc，镜像 ~300MB vs 标准版 ~800MB）
+#
+# 资源预算:
+#   容器              CPU    内存      备注
+#   ──────            ───    ────      ────
+#   redis             0.25   128MB    消息队列骨干
+#   pipeline-worker   0.75   512MB    合并 5 个业务阶段 + 通知脚本
+#   freqtrade         0.50   256MB    交易执行引擎（AiSignalStrategy）
+#   ───────────────────────────────────────────
+#   TOTAL            1.50    896MB    ✅ 2GB RAM 设备流畅运行
+#
+# 与标准版功能差异:
+#   ❌ 移除: TimescaleDB / InfluxDB / Prometheus / Grafana / AlertManager
+#   ❌ 移除: dashboard / factor-decay-monitor / health-check（功能移至内部）
+#   ✅ 保留: Redis / Freqtrade / 全部 5 个业务模块
+#   ⚠️  替换: TimescaleDB → SQLite + Parquet
+# ============================================================================
+
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "5m"
+    max-file: "3"
+
+services:
+
+  # ─── 消息队列骨干 ───────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    command: >
+      redis-server
+      --save ""
+      --appendonly no
+      --maxmemory 128mb
+      --maxmemory-policy allkeys-lru
+    ports:
+      - "127.0.0.1:6379:6379"
+    networks: [internal]
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+        reservations:
+          memory: 64M
+
+  # ─── 合并流水线 Worker ──────────────────────────────────────
+  # 一个容器跑 5 个 asyncio 任务，完成全流程业务逻辑
+  # 通知（Telegram/钉钉）作为内部协程运行
+  pipeline-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.lightweight
+    command: python -m app.pipeline_worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      SYMBOLS: ${SYMBOLS:-BTCUSDT,ETHUSDT}
+      KLINE_INTERVAL: ${KLINE_INTERVAL:-1h}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_JSON: ${LOG_JSON:-false}
+      LITE_DB_PATH: /app/data/decisions.db
+      HISTORICAL_DATA_PATH: /app/data/historical
+
+      # LLM 配置（二选一或自定义）
+      LLM_BACKEND: ${LLM_BACKEND:-openai}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      LLM_API_BASE: ${LLM_API_BASE:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+
+      # 风控配置
+      MAX_CONSECUTIVE_LOSSES: ${MAX_CONSECUTIVE_LOSSES:-5}
+      MAX_DAILY_DRAWDOWN_PCT: ${MAX_DAILY_DRAWDOWN_PCT:-5.0}
+
+      # Telegram/钉钉通知（可选，不设则静默）
+      ALERT_TELEGRAM_BOT_TOKEN: ${ALERT_TELEGRAM_BOT_TOKEN:-}
+      ALERT_TELEGRAM_CHAT_ID: ${ALERT_TELEGRAM_CHAT_ID:-}
+      ALERT_DINGTALK_WEBHOOK: ${ALERT_DINGTALK_WEBHOOK:-}
+      ALERT_DINGTALK_SECRET: ${ALERT_DINGTALK_SECRET:-}
+    secrets:
+      - llm_api_key
+      - binance_api_key
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - historical_data:/app/data/historical
+      - lite_db_data:/app/data
+    networks: [internal, external]
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  # ─── Freqtrade 交易执行引擎 ─────────────────────────────────
+  # 保留不动——成熟稳定，消费 trade_order Stream 执行实际下单
+  freqtrade:
+    image: freqtradeorg/freqtrade:stable
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8081:8080"
+    volumes:
+      - ./freqtrade_strategies/AiSignalStrategy.py:/freqtrade/user_data/strategies/AiSignalStrategy.py
+      - ./freqtrade_strategies/__init__.py:/freqtrade/user_data/strategies/__init__.py
+      - ./freqtrade_strategies/user_data:/freqtrade/user_data
+      - ./freqtrade_strategies/config.json:/freqtrade/config.json
+    secrets:
+      - binance_api_key
+      - binance_api_secret
+    depends_on:
+      pipeline-worker:
+        condition: service_started
+    networks: [internal, external]
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+        reservations:
+          memory: 128M
+
+# ─── 密钥管理 ────────────────────────────────────────────────
+secrets:
+  llm_api_key:
+    file: ./secrets/llm_api_key.txt
+  binance_api_key:
+    file: ./secrets/binance_api_key.txt
+  binance_api_secret:
+    file: ./secrets/binance_api_secret.txt
+
+# ─── 网络 ────────────────────────────────────────────────────
+networks:
+  internal:
+    internal: true
+  external: {}
+
+# ─── 数据卷 ──────────────────────────────────────────────────
+volumes:
+  historical_data:
+    driver: local
+    driver_opts:
+      type: none
+      device: ${PWD}/data/historical
+      o: bind
+  lite_db_data:
+    driver: local
+    driver_opts:
+      type: none
+      device: ${PWD}/data
+      o: bind
