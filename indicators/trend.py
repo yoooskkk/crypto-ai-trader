@@ -3,9 +3,14 @@
 所属层级: 指标计算层 (Indicators)
 输入来源: 经过预热的 OHLCV DataFrame（至少需包含 required_warmup 行数据，详见说明）
 输出去向: 在 DataFrame 上追加指标列，并丢弃前 required_warmup 行（避免 NaN）
-关键依赖: pandas, pandas_ta, yaml, functools, os, pathlib
+关键依赖: pandas, yaml, functools, os, pathlib
+（无外部第三方指标库依赖，全部使用 pandas/numpy 原生实现）
 
 修订记录:
+- v2.0: 移除 pandas_ta 依赖，全部改用 pandas/numpy 原生实现
+        EMA → series.ewm(span).mean()
+        SMA → series.rolling(window).mean()
+        MACD → ema_fast - ema_slow + signal ema
 - v1.2 (2025-03-13): [P0] 添加 close 列校验；YAML schema 校验；函数纯化（copy）。
                       [P1] MACD 列名标准化；丢弃预热行（NaN 处理）。
 """
@@ -18,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-import pandas_ta as ta
+import numpy as np
 import yaml
 
 logger = structlog.get_logger(__name__)
@@ -96,43 +101,68 @@ def _validate_close_column(df: pd.DataFrame) -> None:
         raise ValueError("'close' 列必须为数值类型")
 
 
+def _ema(series: pd.Series, period: int) -> pd.Series:
+    """纯 pandas 实现 EMA，无外部依赖。"""
+    return series.ewm(span=period, adjust=False).mean()
+
+
+def _sma(series: pd.Series, period: int) -> pd.Series:
+    """纯 pandas 实现 SMA（简单移动平均）。"""
+    return series.rolling(window=period, min_periods=period).mean()
+
+
 def add_ema(df: pd.DataFrame, periods: list[int]) -> pd.DataFrame:
     """为 DataFrame 添加指定周期的 EMA 列。"""
+    close = df["close"]
     for p in periods:
         col_name = f"EMA_{p}"
         if col_name not in df.columns:
-            df[col_name] = ta.ema(df["close"], length=p)
+            df[col_name] = _ema(close, p)
             logger.debug("添加趋势指标: %s (周期=%d)", col_name, p)
         else:
             logger.debug("趋势指标 %s 已存在，跳过计算", col_name)
     return df
 
 
+def add_sma(df: pd.DataFrame, periods: list[int]) -> pd.DataFrame:
+    """为 DataFrame 添加指定周期的 SMA 列（下游需要时调用）。"""
+    close = df["close"]
+    for p in periods:
+        col_name = f"SMA_{p}"
+        if col_name not in df.columns:
+            df[col_name] = _sma(close, p)
+            logger.debug("添加趋势指标: %s (周期=%d)", col_name, p)
+    return df
+
+
 def add_macd(df: pd.DataFrame, fast: int, slow: int, signal: int) -> pd.DataFrame:
     """
-    为 DataFrame 添加 MACD 指标。
+    为 DataFrame 添加 MACD 指标（纯 pandas 实现）。
     生成列后，重命名为标准化名称: MACD, MACDh, MACDs (P1)。
+
+    算法:
+        MACD线 = EMA(fast) - EMA(slow)
+        信号线 = EMA(MACD线, signal)
+        柱状图 = MACD线 - 信号线
     """
-    suffix = f"_{fast}_{slow}_{signal}"
-    macd_col = f"MACD{suffix}"
-    hist_col = f"MACDh{suffix}"
-    signal_col = f"MACDs{suffix}"
+    macd_col = "MACD"
+    hist_col = "MACDh"
+    signal_col = "MACDs"
 
     if macd_col not in df.columns:
-        macd_result = ta.macd(df["close"], fast=fast, slow=slow, signal=signal)
-        if macd_result is not None:
-            # 重命名: 去掉参数后缀，使下游使用标准列名
-            rename_map = {
-                macd_col: "MACD",
-                hist_col: "MACDh",
-                signal_col: "MACDs",
-            }
-            macd_result.rename(columns=rename_map, inplace=True)
-            for col in macd_result.columns:
-                df[col] = macd_result[col]
-            logger.debug("添加趋势指标: MACD (fast=%d, slow=%d, signal=%d)", fast, slow, signal)
+        close = df["close"]
+        ema_fast = _ema(close, fast)
+        ema_slow = _ema(close, slow)
+        macd_line = ema_fast - ema_slow
+        signal_line = _ema(macd_line, signal)
+        histogram = macd_line - signal_line
+
+        df[macd_col] = macd_line
+        df[signal_col] = signal_line
+        df[hist_col] = histogram
+
+        logger.debug("添加趋势指标: MACD (fast=%d, slow=%d, signal=%d)", fast, slow, signal)
     else:
-        # 如果已存在标准列（说明是此前重命名后的），也跳过
         logger.debug("MACD 指标列已存在，跳过计算")
 
     return df

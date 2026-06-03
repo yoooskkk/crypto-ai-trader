@@ -3,9 +3,15 @@
 所属层级: 指标计算层 (Indicators)
 输入来源: OHLCV DataFrame（列: open, high, low, close, volume）
 输出去向: 追加动量指标列的 DataFrame（NaN 保留，不丢弃行）
-关键依赖: pandas, pandas_ta, structlog, yaml
+关键依赖: pandas, numpy, structlog, yaml
+（无外部第三方指标库依赖，全部使用 pandas/numpy 原生实现）
 
 修订记录:
+- v3.0: 移除 pandas_ta 依赖，全部改用 pandas/numpy 原生实现
+        RSI → pure pandas (EMA of gains/losses)
+        ROC → pct_change
+        CCI → typical price - SMA / (0.015 × Mean Absolute Deviation)
+        STOCH → %K = (close - LL) / (HH - LL)
 - v2.0: 重写为 DataFrame→DataFrame 模式，统一与 trend.py 接口风格
         补 CCI(20)，对齐 config/indicators.yml 键名，统一使用 structlog
 """
@@ -17,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-import pandas_ta as ta
+import numpy as np
 import structlog
 import yaml
 
@@ -86,7 +92,28 @@ def compute_rsi(df: pd.DataFrame, period: int) -> pd.Series:
         logger.warning("DataFrame 缺少 'close' 列")
         return pd.Series(index=df.index, dtype=float, name=f"RSI_{period}")
 
-    rsi = ta.rsi(df["close"], length=period)
+        """
+    纯 pandas 实现 RSI（相对强弱指标）。
+
+    算法:
+        1. 计算每日价格变化 delta
+        2. 分离上涨日(gain)和下跌日(loss)
+        3. 用 EMA 平滑 gain 和 loss 的平均值
+        4. RS = avg_gain / avg_loss
+        5. RSI = 100 - (100 / (1 + RS))
+    """
+    close = df["close"]
+    delta = close.diff()
+
+    gain = delta.where(delta > 0, 0.0)
+    loss = (-delta.where(delta < 0, 0.0))
+
+    avg_gain = gain.ewm(span=period, adjust=False).mean()
+    avg_loss = loss.ewm(span=period, adjust=False).mean()
+
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    rsi = 100.0 - (100.0 / (1.0 + rs))
+
     rsi.name = f"RSI_{period}"
     return rsi
 
@@ -106,7 +133,7 @@ def compute_roc(df: pd.DataFrame, period: int) -> pd.Series:
         logger.warning("DataFrame 缺少 'close' 列")
         return pd.Series(index=df.index, dtype=float, name=f"ROC_{period}")
 
-    roc = ta.roc(df["close"], length=period)
+        roc = df["close"].pct_change(periods=period) * 100.0
     roc.name = f"ROC_{period}"
     return roc
 
@@ -128,7 +155,24 @@ def compute_cci(df: pd.DataFrame, period: int) -> pd.Series:
             logger.warning("DataFrame 缺少 '%s' 列", col, column=col)
             return pd.Series(index=df.index, dtype=float, name=f"CCI_{period}")
 
-    cci = ta.cci(df["high"], df["low"], df["close"], length=period)
+        """
+    纯 pandas 实现 CCI（商品通道指数）。
+
+    算法:
+        1. TP = (high + low + close) / 3
+        2. SMA_TP = SMA(TP, period)
+        3. MAD = Mean Absolute Deviation of TP
+        4. CCI = (TP - SMA_TP) / (0.015 × MAD)
+    """
+    tp = (df["high"] + df["low"] + df["close"]) / 3.0
+    tp_ma = tp.rolling(window=period, min_periods=period).mean()
+
+    # Mean Absolute Deviation
+    mad = tp.rolling(window=period, min_periods=period).apply(
+        lambda x: np.abs(x - x.mean()).mean(), raw=True
+    )
+
+    cci = (tp - tp_ma) / (0.015 * mad.replace(0, np.nan))
     cci.name = f"CCI_{period}"
     return cci
 
@@ -153,14 +197,29 @@ def compute_stoch(df: pd.DataFrame, k: int, d: int, smooth_k: int) -> tuple[pd.S
             empty = pd.Series(index=df.index, dtype=float, name=f"STOCH_K_{k}_{d}")
             return empty, empty.copy()
 
-    stoch = ta.stoch(df["high"], df["low"], df["close"], k=k, d=d, smooth_k=smooth_k)
-    if stoch is None:
-        logger.warning("STOCH 计算返回 None")
-        empty = pd.Series(index=df.index, dtype=float, name=f"STOCH_K_{k}_{d}")
-        return empty, empty.copy()
+        """
+    纯 pandas 实现 Stochastic Oscillator（随机指标 %K 和 %D）。
 
-    stoch_k = stoch.iloc[:, 0].rename(f"STOCH_K_{k}_{d}")
-    stoch_d = stoch.iloc[:, 1].rename(f"STOCH_D_{k}_{d}")
+    算法:
+        %K = SMA((close - LL) / (HH - LL) × 100, smooth_k)
+        %D = SMA(%K, d)
+        其中 LL = 最低价的最低值, HH = 最高价的最高值
+    """
+    high_k = df["high"].rolling(window=k, min_periods=k).max()
+    low_k = df["low"].rolling(window=k, min_periods=k).min()
+
+    # %K raw: (close - LL) / (HH - LL) * 100
+    range_k = high_k - low_k
+    stoch_raw = 100.0 * (df["close"] - low_k) / range_k.replace(0, np.nan)
+
+    # 平滑 %K
+    stoch_k = stoch_raw.rolling(window=smooth_k, min_periods=1).mean()
+
+    # %D = SMA of %K
+    stoch_d = stoch_k.rolling(window=d, min_periods=1).mean()
+
+    stoch_k = stoch_k.rename(f"STOCH_K_{k}_{d}")
+    stoch_d = stoch_d.rename(f"STOCH_D_{k}_{d}")
     return stoch_k, stoch_d
 
 

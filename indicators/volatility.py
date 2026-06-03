@@ -3,9 +3,14 @@
 所属层级: 指标计算层 (Indicators)
 输入来源: OHLCV DataFrame（列: open, high, low, close, volume）
 输出去向: 追加波动率指标列的 DataFrame（NaN 保留，不丢弃行）
-关键依赖: pandas, pandas_ta, structlog, yaml
+关键依赖: pandas, numpy, structlog, yaml
+（无外部第三方指标库依赖，全部使用 pandas/numpy 原生实现）
 
 修订记录:
+- v2.0: 移除 pandas_ta 依赖，全部改用 pandas/numpy 原生实现
+        ATR → TR = max(H-L, |H-prevC|, |L-prevC|), then EMA
+        STDDEV → rolling.std(ddof=0)
+        BBANDS → SMA ± std × multiplier
 - v1.0: 初始实现，ATR(14) + STDDEV(20) + BBANDS(20,2)
 """
 
@@ -16,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-import pandas_ta as ta
+import numpy as np
 import structlog
 import yaml
 
@@ -87,7 +92,26 @@ def compute_atr(df: pd.DataFrame, period: int) -> pd.Series:
             logger.warning("DataFrame 缺少 '%s' 列", col, column=col)
             return pd.Series(index=df.index, dtype=float, name=f"ATR_{period}")
 
-    atr = ta.atr(df["high"], df["low"], df["close"], length=period)
+        """
+    纯 pandas 实现 ATR（平均真实波幅）。
+
+    算法:
+        TR = max(high - low, |high - prev_close|, |low - prev_close|)
+        ATR = EMA(TR, period)
+    """
+    high = df["high"]
+    low = df["low"]
+    close = df["close"]
+
+    tr1 = high - low
+    tr2 = (high - close.shift(1)).abs()
+    tr3 = (low - close.shift(1)).abs()
+
+    # 三个 TR 中的最大值
+    true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+
+    # ATR = EMA of True Range
+    atr = true_range.ewm(span=period, adjust=False).mean()
     atr.name = f"ATR_{period}"
     return atr
 
@@ -107,7 +131,7 @@ def compute_stddev(df: pd.DataFrame, period: int) -> pd.Series:
         logger.warning("DataFrame 缺少 'close' 列")
         return pd.Series(index=df.index, dtype=float, name=f"STDDEV_{period}")
 
-    stddev = ta.stdev(df["close"], length=period)
+        stddev = df["close"].rolling(window=period, min_periods=period).std(ddof=0)
     stddev.name = f"STDDEV_{period}"
     return stddev
 
@@ -129,19 +153,27 @@ def compute_bbands(df: pd.DataFrame, period: int, std: int | float) -> tuple[pd.
         empty = pd.Series(index=df.index, dtype=float, name=f"BBANDS_upper_{period}_{std}")
         return empty, empty.copy(), empty.copy()
 
-    bbands = ta.bbands(df["close"], length=period, std=std)
-    if bbands is None:
-        logger.warning("BBANDS 计算返回 None")
-        empty = pd.Series(index=df.index, dtype=float, name=f"BBANDS_upper_{period}_{std}")
-        return empty, empty.copy(), empty.copy()
+        """
+    纯 pandas 实现 BBANDS（布林带）。
 
-    # pandas_ta 返回列名格式: BBL_{period}_{std}, BBM_{period}_{std}, BBU_{period}_{std}, BBB_{period}_{std}
-    # 重命名为清晰名称
-    upper = bbands.iloc[:, 2].rename(f"BBANDS_upper_{period}_{std}")  # BBU
-    mid = bbands.iloc[:, 1].rename(f"BBANDS_mid_{period}_{std}")      # BBM
-    lower = bbands.iloc[:, 0].rename(f"BBANDS_lower_{period}_{std}")  # BBL
+    算法:
+        mid = SMA(close, period)
+        std = 标准差(close, period)
+        upper = mid + std × multiplier
+        lower = mid - std × multiplier
+    """
+    close = df["close"]
+    mid = close.rolling(window=period, min_periods=period).mean()
+    std_series = close.rolling(window=period, min_periods=period).std(ddof=0)
 
-    return upper, mid, lower
+    upper_band = mid + std_series * std
+    lower_band = mid - std_series * std
+
+    upper = upper_band.rename(f"BBANDS_upper_{period}_{std}")
+    mid_renamed = mid.rename(f"BBANDS_mid_{period}_{std}")
+    lower = lower_band.rename(f"BBANDS_lower_{period}_{std}")
+
+    return upper, mid_renamed, lower
 
 
 def compute_volatility(df: pd.DataFrame, cfg: dict | None = None) -> pd.DataFrame:

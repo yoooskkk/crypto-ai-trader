@@ -3,10 +3,11 @@
 所属层级: 指标计算层 (Indicators)
 输入来源: OHLCV DataFrame（列: open, high, low, close, volume）
 输出去向: 追加时序操作列的 DataFrame（NaN 保留，不丢弃行）
-关键依赖: pandas, pandas_ta, structlog, yaml
+关键依赖: pandas, numpy, structlog, yaml
+（无外部第三方指标库依赖，全部使用 pandas/numpy 原生实现）
 
 修订记录:
-- v1.0: 初始实现，DELAY + DELTA + TS_MAX + TS_MIN + TS_RANK + TS_ZSCORE + CORR
+- v1.0: 初始实现，DELAY + DELTA + TS_MAX + TS_MIN + TS_RANK + TS_ZSCORE + CORR（已是纯 pandas 实现）
 """
 
 from __future__ import annotations

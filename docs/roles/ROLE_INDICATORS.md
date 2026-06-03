@@ -85,16 +85,21 @@ BBANDS_PERIOD = _cfg["volatility"]["bbands"]["period"]  # 例：20
 
 ```python
 import pandas as pd
-import pandas_ta as ta
+
 
 def compute_momentum(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     """
     输入：OHLCV DataFrame（列：open/high/low/close/volume）
     输出：追加了动量指标列的 DataFrame
     列命名约定：RSI_14，ROC_10，CCI_20，STOCH_K_14，STOCH_D_14
+    所有指标用纯 pandas/numpy 实现，无第三方指标库依赖（如 pandas_ta/talib）。
     """
     period = cfg["rsi"]["period"]  # 从 config 读取
-    df["RSI_14"] = ta.rsi(df["close"], length=period)
+    # 纯 pandas RSI 实现（5 行）
+    delta = df["close"].diff()
+    gain = delta.where(delta > 0, 0.0).ewm(span=period, adjust=False).mean()
+    loss = (-delta.where(delta < 0, 0.0)).ewm(span=period, adjust=False).mean()
+    df["RSI_14"] = 100.0 - (100.0 / (1.0 + gain / loss.replace(0, float('nan'))))
     ...
     return df
 ```

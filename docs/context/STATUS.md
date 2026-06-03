@@ -115,6 +115,7 @@ _全部 P3 模块已完成 ✅_
 | 无部署文档 | 创建 `docs/deployment/` 三件套：`deployment.md`（从零到生产完整步骤 + 架构图 + 升级回滚）、`operations.md`（日常运维 SOP 7 项 + 模型管理 + 性能调优）、`troubleshooting.md`（按症状分类排查手册 20+ 场景）✅ |
 | 无负载测试脚本 | 创建 `scripts/load_test.py`：4 种模式（smoke/load/stability/latency）+ JSON 输出 + Docker 容器检查 + Redis Stream 延迟测量 + `test_load_test.py` 33 测试全部通过 ✅ |
 | LLM 仅支持 OpenAI/Anthropic | `llm_client.py` 添加 `deepseek` 后端（OpenAI 兼容 API），可通过 `LLM_BACKEND=deepseek` 环境变量切换；`secrets_loader.py` 添加 DeepSeek 密钥映射；部署文档更新 DeepSeek 配置说明 ✅ |
+| `pandas_ta` 依赖导致 Docker 构建失败（Python 3.14 + numba 无 wheel） | 5 个指标模块（trend/momentum/volatility/volume/timeseries）全部重写为纯 pandas/numpy，移除 `pandas_ta`/`ta-lib` 依赖；删除 `conftest.py` 的 numba shim；更新 `ROLE_INDICATORS.md` 示例代码；`requirements.txt` 清理过时依赖；Docker 构建不再需要 LLVM 编译环境 ✅ |
 | detector.py 枚举值大小写不一致 | `Regime` 值改为大写（TRENDING/RANGING/HIGH_VOLATILITY/UNKNOWN）|
 | config/indicators.yml 缺少 timeseries 段 | 已添加完整配置段 |
 | 6 个文件使用 logging 而非 structlog | trend.py / reconnect_guard.py / gap_filler.py / circuit_breaker.py / llm_client.py / prompt_versioner.py 已迁移 |

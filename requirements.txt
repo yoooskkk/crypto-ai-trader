@@ -6,8 +6,6 @@ python-binance>=1.0.19
 # 指标计算
 pandas>=2.2
 numpy>=1.26
-pandas-ta>=0.3.14b
-ta-lib>=0.4.28
 
 # AI 引擎
 openai>=1.30
@@ -20,7 +18,7 @@ redis>=5.0
 psycopg2-binary>=2.9
 influxdb-client>=1.43
 
-# 市场制度识别
+# 市场制度识别（使用 numba-free 纯 numpy/pandas 实现）
 hmmlearn>=0.3
 scikit-learn>=1.4
 

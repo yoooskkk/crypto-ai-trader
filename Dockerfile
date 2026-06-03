@@ -20,11 +20,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # 复制依赖声明
 COPY requirements.txt requirements-dev.txt ./
 
-# 安装依赖到 /install 目录
-RUN pip install --no-cache-dir --prefix=/install \
+# 安装依赖到 /install 目录（仅使用预编译 wheel，不编译源码）
+# 注: 所有指标模块已改用纯 pandas/numpy 实现，无需 pandas_ta/ta-lib/numba
+RUN pip install --only-binary :all: --no-cache-dir --prefix=/install \
     -r requirements.txt \
-    -r requirements-dev.txt 2>/dev/null || \
-    pip install --no-cache-dir --prefix=/install -r requirements.txt
+    -r requirements-dev.txt || \
+    pip install --only-binary :all: --no-cache-dir --prefix=/install -r requirements.txt
 
 # ─── Stage 2: 运行时 ────────────────────────────────────────────────────
 FROM python:3.14-slim AS runtime
