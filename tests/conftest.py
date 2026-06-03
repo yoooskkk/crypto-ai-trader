@@ -4,7 +4,38 @@
 
 from __future__ import annotations
 
+import sys
+from unittest.mock import MagicMock
+
 import pytest
+
+# ─── numba 兼容性 shim（Python 3.14+ 暂不支持 numba） ─────
+# 在 pandas_ta 导入前，将 numba 替换为无操作 mock
+if "numba" not in sys.modules:
+    import types
+
+    _numba = types.ModuleType("numba")
+
+    def _njit(func=None, *args, **kwargs):
+        """无操作装饰器"""
+        if func is not None:
+            return func
+        def decorator(f):
+            return f
+        return decorator
+
+    _numba.njit = _njit
+    _numba.generated_jit = _njit
+    _numba.prange = range
+    _numba.__version__ = "0.61.2-shim"
+
+    sys.modules["numba"] = _numba
+
+    # 也 mock numba.core 和 numba.typed
+    for _sub in ("core", "typed", "experimental"):
+        _sub_mod = types.ModuleType(f"numba.{_sub}")
+        _sub_mod.__path__ = []
+        sys.modules[f"numba.{_sub}"] = _sub_mod
 
 
 @pytest.fixture

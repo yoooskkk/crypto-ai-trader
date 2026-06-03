@@ -1,0 +1,1 @@
+"""scripts package - utility scripts for crypto-ai-trader."""

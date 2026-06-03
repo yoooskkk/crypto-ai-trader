@@ -25,7 +25,7 @@ def load_available_timeframes() -> list[str]:
             logger.warning("timeframes.yml 未找到，使用默认", path=str(_CONFIG_PATH))
             return ["1m", "5m", "15m", "1h", "4h", "1d"]
 
-        with open(_CONFIG_PATH) as f:
+        with open(_CONFIG_PATH, encoding="utf-8") as f:
             cfg = yaml.safe_load(f)
 
         available = cfg.get("available", [])

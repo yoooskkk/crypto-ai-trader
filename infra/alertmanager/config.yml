@@ -1,0 +1,35 @@
+# AlertManager config - Crypto AI Trader
+route:
+  receiver: default
+  group_by: [alertname, severity]
+  group_wait: 10s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - receiver: critical
+      match:
+        severity: critical
+      repeat_interval: 1h
+    - receiver: warning
+      match:
+        severity: warning
+      repeat_interval: 6h
+
+receivers:
+  - name: default
+    webhook_configs:
+      - url: "${ALERT_WEBHOOK_URL}"
+        send_resolved: true
+  - name: critical
+    webhook_configs:
+      - url: "${ALERT_CRITICAL_WEBHOOK_URL}"
+  - name: warning
+    webhook_configs:
+      - url: "${ALERT_WEBHOOK_URL}"
+
+inhibit_rules:
+  - source_match:
+      severity: critical
+    target_match:
+      severity: warning
+    equal: [alertname]

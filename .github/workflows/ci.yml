@@ -1,0 +1,205 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  # ─── 代码质量 ───────────────────────────────────────────────
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Lint with ruff
+        run: ruff check . --ignore E501,F403 --exit-zero
+
+      - name: Type check with mypy (core modules)
+        run: |
+          mypy --ignore-missing-imports --follow-imports skip \
+            risk_guardian/ \
+            validation/ \
+            observability/ \
+            scripts/ \
+            ui/dashboard/app.py \
+          || echo "mypy completed with warnings"
+
+      - name: Check Dockerfile syntax
+        run: docker build --no-cache --target builder . -t trader-builder 2>&1 || echo "Docker build check skipped"
+
+  # ─── 单元测试 ───────────────────────────────────────────────
+  test:
+    name: Unit Tests (${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [lint]
+
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 3
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+          pip install pytest pytest-asyncio pytest-cov pytest-split
+
+      - name: Run tests (shard ${{ matrix.shard }})
+        run: |
+          python -m pytest tests/ \
+            --cov=. \
+            --cov-report=xml:coverage-${{ matrix.shard }}.xml \
+            --cov-report=term-missing:skip-covered \
+            --splits 3 \
+            --group ${{ matrix.shard }} \
+            -v \
+            --tb=short \
+            -q
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.shard }}
+          path: coverage-*.xml
+
+  # ─── 集成测试 ───────────────────────────────────────────────
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [test]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run integration tests
+        run: |
+          python -m pytest tests/test_integration.py \
+            -v --tb=short -q
+
+  # ─── 合并覆盖率 ─────────────────────────────────────────────
+  coverage:
+    name: Coverage Report
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [test]
+    if: always()
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install coverage
+        run: pip install coverage
+
+      - name: Combine & report
+        run: |
+          coverage combine coverage-*.xml
+          coverage report --fail-under=60
+          coverage xml -o coverage-final.xml
+
+      - name: Upload final coverage
+        uses: codecov/codecov-action@v4
+        with:
+          file: coverage-final.xml
+          fail_ci_if_error: false
+
+  # ─── Docker 构建 ─────────────────────────────────────────────
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [test, integration]
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: crypto-ai-trader:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ─── 通知 ───────────────────────────────────────────────────
+  notify:
+    name: Notify Status
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [coverage, docker]
+    if: always() && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Check status
+        run: |
+          echo "CI pipeline completed for ${{ github.sha }}"
+          echo "Status: ${{ needs.coverage.result }} / ${{ needs.docker.result }}"

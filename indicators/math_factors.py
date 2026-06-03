@@ -62,7 +62,7 @@ def load_math_factors_params(config_path: str | Path | None = None) -> dict[str,
             "abs_return_period": 1,
         }
 
-    with open(cfg_path) as f:
+    with open(cfg_path, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
     math_cfg = cfg.get("math_factors", {})

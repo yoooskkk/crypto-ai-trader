@@ -7,13 +7,23 @@
   "dry_run_wallet": 10000,
   "cancel_open_orders_on_exit": true,
   "trading_mode": "spot",
+  "margin_mode": "",
   "exchange": {
     "name": "binance",
     "key": "",
     "secret": "",
     "ccxt_config": {
-      "enableRateLimit": true
-    }
+      "enableRateLimit": true,
+      "rateLimit": 200
+    },
+    "pair_whitelist": [
+      "BTC/USDT",
+      "ETH/USDT",
+      "BNB/USDT",
+      "SOL/USDT",
+      "DOGE/USDT"
+    ],
+    "pair_blacklist": []
   },
   "telegram": {
     "enabled": false,
@@ -26,13 +36,92 @@
     "listen_port": 8080,
     "verbosity": "error",
     "enable_openapi": false,
-    "jwt_secret_key": "CHANGE_ME",
+    "jwt_secret_key": "CHANGE_ME_TO_A_RANDOM_SECRET",
     "CORS_origins": []
   },
   "bot_name": "crypto-ai-trader",
   "initial_state": "running",
   "force_entry_enable": false,
   "internals": {
-    "process_throttle_secs": 5
-  }
+    "process_throttle_secs": 5,
+    "print_colorized": true
+  },
+  "strategy": "AiSignalStrategy",
+  "strategy_path": "freqtrade_strategies",
+  "timeframe": "1h",
+  "timeframe_detail": "",
+  "freqai": {
+    "enabled": false
+  },
+  "entry_pricing": {
+    "price_side": "same",
+    "use_order_book": true,
+    "order_book_top": 1,
+    "price_last_balance": 0.0
+  },
+  "exit_pricing": {
+    "price_side": "same",
+    "use_order_book": true,
+    "order_book_top": 1
+  },
+  "pairlists": [
+    {
+      "method": "StaticPairList"
+    },
+    {
+      "method": "AgeFilter",
+      "min_days_listed": 7
+    },
+    {
+      "method": "VolumePairList",
+      "number_assets": 10,
+      "sort_key": "quoteVolume"
+    }
+  ],
+  "protections": [
+    {
+      "method": "CooldownPeriod",
+      "stop_duration_candle": 4
+    },
+    {
+      "method": "StoplossGuard",
+      "lookback_period_candles": 24,
+      "stop_threshold": -0.1,
+      "only_per_pair": false
+    },
+    {
+      "method": "MaxDrawdown",
+      "lookback_period_candles": 48,
+      "trade_limit": 20,
+      "stop_duration_candle": 12,
+      "max_allowed_drawdown": 0.15
+    }
+  ],
+  "unfilledtimeout": {
+    "entry": 30,
+    "exit": 30,
+    "exit_timeout_count": 0,
+    "unit": "minutes"
+  },
+  "order_types": {
+    "entry": "limit",
+    "exit": "limit",
+    "stoploss": "market",
+    "stoploss_on_exchange": false
+  },
+  "order_time_in_force": {
+    "entry": "GTC",
+    "exit": "GTC"
+  },
+  "minimal_roi": {
+    "0": 0.05,
+    "60": 0.02,
+    "120": 0.005
+  },
+  "stoploss": -0.03,
+  "trailing_stop": true,
+  "trailing_stop_positive": 0.01,
+  "trailing_stop_positive_offset": 0.02,
+  "trailing_only_offset_is_reached": true,
+  "use_custom_stoploss": true
 }

@@ -48,7 +48,7 @@ def load_volume_params(config_path: str | Path | None = None) -> dict[str, Any]:
             "vol_ratio_period": 20,
         }
 
-    with open(cfg_path) as f:
+    with open(cfg_path, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
     vol_cfg = cfg.get("volume", {})
@@ -78,7 +78,10 @@ def compute_obv(df: pd.DataFrame) -> pd.Series:
             logger.warning("DataFrame 缺少 '%s' 列", col, column=col)
             return pd.Series(index=df.index, dtype=float, name="OBV")
 
-    obv = ta.obv(df["close"], df["volume"])
+        obv = ta.obv(df["close"], df["volume"])
+    if obv is None:
+        logger.warning("OBV 计算返回 None")
+        return pd.Series(index=df.index, dtype=float, name="OBV")
     obv.name = "OBV"
     return obv
 
@@ -101,6 +104,9 @@ def compute_vwap(df: pd.DataFrame) -> pd.Series:
             return pd.Series(index=df.index, dtype=float, name="VWAP")
 
     vwap = ta.vwap(df["high"], df["low"], df["close"], df["volume"])
+    if vwap is None:
+        logger.warning("VWAP 计算返回 None")
+        vwap = pd.Series(index=df.index, dtype=float, name="VWAP")
     vwap.name = "VWAP"
     return vwap
 
@@ -121,7 +127,10 @@ def compute_mfi(df: pd.DataFrame, period: int) -> pd.Series:
             logger.warning("DataFrame 缺少 '%s' 列", col, column=col)
             return pd.Series(index=df.index, dtype=float, name=f"MFI_{period}")
 
-    mfi = ta.mfi(df["high"], df["low"], df["close"], df["volume"], length=period)
+        mfi = ta.mfi(df["high"], df["low"], df["close"], df["volume"], length=period)
+    if mfi is None:
+        logger.warning("MFI 计算返回 None")
+        return pd.Series(index=df.index, dtype=float, name=f"MFI_{period}")
     mfi.name = f"MFI_{period}"
     return mfi
 
@@ -142,7 +151,10 @@ def compute_cmf(df: pd.DataFrame, period: int) -> pd.Series:
             logger.warning("DataFrame 缺少 '%s' 列", col, column=col)
             return pd.Series(index=df.index, dtype=float, name=f"CMF_{period}")
 
-    cmf = ta.cmf(df["high"], df["low"], df["close"], df["volume"], length=period)
+        cmf = ta.cmf(df["high"], df["low"], df["close"], df["volume"], length=period)
+    if cmf is None:
+        logger.warning("CMF 计算返回 None")
+        return pd.Series(index=df.index, dtype=float, name=f"CMF_{period}")
     cmf.name = f"CMF_{period}"
     return cmf
 
@@ -162,7 +174,10 @@ def compute_vol_ratio(df: pd.DataFrame, period: int) -> pd.Series:
         logger.warning("DataFrame 缺少 'volume' 列")
         return pd.Series(index=df.index, dtype=float, name=f"VOL_RATIO_{period}")
 
-    vol_sma = ta.sma(df["volume"], length=period)
+        vol_sma = ta.sma(df["volume"], length=period)
+    if vol_sma is None:
+        logger.warning("VOL_RATIO 计算失败（SMA 返回 None）")
+        return pd.Series(index=df.index, dtype=float, name=f"VOL_RATIO_{period}")
     vol_ratio = df["volume"] / vol_sma
     vol_ratio.name = f"VOL_RATIO_{period}"
     return vol_ratio

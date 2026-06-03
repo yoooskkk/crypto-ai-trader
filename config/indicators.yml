@@ -40,3 +40,13 @@ crypto_alpha:
   funding_rate_source: binance
   oi_delta_period: 24     # 小时
   cvd_lookback: 100
+  timeout: 15             # API 请求超时秒数
+  retry_count: 3          # 失败重试次数
+  proxy: ""               # HTTP 代理 URL（如 http://proxy.example.com:8080），空=从环境变量读取
+
+  # 环境变量覆盖优先级:
+  #   BINANCE_FAPI_BASE / CRYPTO_ALPHA_BINANCE_URL  → Binance API URL
+  #   HTTP_PROXY / HTTPS_PROXY                       → HTTP/HTTPS 代理
+  #   CRYPTO_ALPHA_TIMEOUT                           → 超时秒数
+  #   CRYPTO_ALPHA_RETRY                             → 重试次数
+  #   CRYPTO_ALPHA_RETRY_DELAY                       → 重试间隔秒数

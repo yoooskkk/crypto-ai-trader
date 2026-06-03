@@ -60,7 +60,7 @@ def load_timeseries_params(config_path: str | Path | None = None) -> dict[str, A
         logger.warning("配置文件未找到，使用默认时序参数", path=str(cfg_path))
         return dict(_DEFAULT_TS_PARAMS)
 
-    with open(cfg_path) as f:
+    with open(cfg_path, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
     ts_cfg = cfg.get("timeseries", {})
@@ -247,25 +247,12 @@ def compute_timeseries(df: pd.DataFrame, cfg: dict | None = None) -> pd.DataFram
         close = df["close"]
         volume = df["volume"]
 
-        # DELAY
         df[f"DELAY_{cfg['delay_period']}"] = compute_delay(close, cfg["delay_period"])
-
-        # DELTA
         df[f"DELTA_{cfg['delta_period']}"] = compute_delta(close, cfg["delta_period"])
-
-        # TS_MAX
         df[f"TS_MAX_{cfg['ts_max_period']}"] = compute_ts_max(close, cfg["ts_max_period"])
-
-        # TS_MIN
         df[f"TS_MIN_{cfg['ts_min_period']}"] = compute_ts_min(close, cfg["ts_min_period"])
-
-        # TS_RANK
         df[f"TS_RANK_{cfg['ts_rank_period']}"] = compute_ts_rank(close, cfg["ts_rank_period"])
-
-        # TS_ZSCORE
         df[f"TS_ZSCORE_{cfg['ts_zscore_period']}"] = compute_ts_zscore(close, cfg["ts_zscore_period"])
-
-        # CORR（close vs volume）
         df[f"CORR_{cfg['corr_period']}"] = compute_corr(close, volume, cfg["corr_period"])
 
     except Exception as e:

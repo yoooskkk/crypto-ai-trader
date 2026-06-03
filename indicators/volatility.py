@@ -48,7 +48,7 @@ def load_volatility_params(config_path: str | Path | None = None) -> dict[str, A
             "bbands": {"period": 20, "std": 2},
         }
 
-    with open(cfg_path) as f:
+    with open(cfg_path, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
     vol_cfg = cfg.get("volatility", {})

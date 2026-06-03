@@ -95,18 +95,38 @@ _全部 P3 模块已完成 ✅_
 
 | 问题 | 严重程度 | 负责角色 |
 |-----|---------|---------|
-| `regime/hmm_model.py` 需要离线训练数据，训练脚本未写 | 中 | ROLE_INDICATORS |
 | 新闻情绪历史数据难以获取，回测时需要 mock | 低 | ROLE_ANALYSIS |
-| Freqtrade force_exit API 调用方式需验证版本兼容性 | 高 | ROLE_RISK |
-| crypto_alpha.py 依赖 aiohttp 调用 Binance Futures API，需在生产环境配置代理或白名单 | 中 | ROLE_INFRA |
+<!-- crypto_alpha.py 代理/白名单问题 — 已解决 ✅ 见下方已解决列表 -->
 
 **已解决 ✅**
 | 问题 | 解决方案 |
-|-----|---------|
+|------|-----------|
+| `observability/alert_manager.py` TODO stub | 已完整实现：AlertManager + TelegramChannel + SlackChannel + ConsoleChannel，含速率限制和环境变量自动配置，配套测试 `test_alert_manager.py` 46+ 测试 |
+| `observability/factor_decay_monitor.py` TODO stub | 已完整实现：FactorDecayMonitorScheduler（run_once/run_all）+ InfluxDB 读写 + Prometheus metrics 导出 + CLI 入口 |
+| `ui/dashboard/app.py` TODO stub | 已完整实现：FastAPI 应用，6 路由（`/`, `/api/health`, `/api/signals`, `/api/risk`, `/api/factors`, `/api/status`），Jinja2 模板，Swagger 文档 |
+| `scripts/health_check.py` TODO stub | 已完整实现：TCP/Redis/TimescaleDB/Freqtrade API 检查，`--json`/`--service` 参数，配套测试 `test_health_check.py` 33+ 测试 |
+| Grafana dashboards/ 目录为空 | 已填充 `trading_system.json`：3 面板组（系统状态/因子衰减/告警历史），Prometheus 数据源 |
+|`scripts/backfill_data.py`（未在已知问题记录）| 已完整实现：ccxt Binance/Kucoin + asyncpg TimescaleDB 写入 + 并发控制 + `--all-major`/`--list-symbols` |
+|`scripts/cli_main.py`（未在已知问题记录）| 已创建：统一 CLI 入口，整合 health/dashboard/backfill/decay/alert/signal/test/check-env/run/hmm-train 全部命令 |
+|`scripts/train_hmm.py` + `hmm_model.py` 离线训练脚本 | 已创建：完整 CLI 训练脚本（`--symbol`/`--all-major`/`--timeframe`/`--force-refresh`/`--concurrency`/`--check-all`/`--list-models`），基于 HMMTrainer 编排多币种多周期并发训练 + 人类可读报告 + 43 测试全部通过 ✅ |
+| `indicators/crypto_alpha.py` Binance API 代理/白名单依赖 | 已修复：`BinanceFuturesPublicClient` 支持 HTTP_PROXY/HTTPS_PROXY 环境变量、BINANCE_FAPI_BASE 自定义 URL、指数退避重试 (429/503/504/超时)、config/indicators.yml 可配 proxy/timeout/retry_count；新增 `test_crypto_alpha.py` 45 测试全部通过 ✅ |
+| Freqtrade force_exit API 版本兼容性验证 | 创建 `risk_guardian/freqtrade_client.py`（JWT 认证 + force_exit(trade_id) + force_exit_all() + health_check），集成到 `circuit_breaker._trip()`（熔断触发时立即强平）和 `processor.py`（回撤 MONTHLY 等级时强平），docker-compose 添加端口映射和环境变量 |
+| 无端到端集成测试（全链路验证） | 创建 `test_integration_pipeline.py`：5 阶段全链路测试（raw_kline → indicators → regime → ai_engine → risk_guardian → trade_order），覆盖正向/降级/错误隔离/性能基线/资源管理/消息契约，37 测试全部通过 ✅ |
+| 无部署文档 | 创建 `docs/deployment/` 三件套：`deployment.md`（从零到生产完整步骤 + 架构图 + 升级回滚）、`operations.md`（日常运维 SOP 7 项 + 模型管理 + 性能调优）、`troubleshooting.md`（按症状分类排查手册 20+ 场景）✅ |
+| 无负载测试脚本 | 创建 `scripts/load_test.py`：4 种模式（smoke/load/stability/latency）+ JSON 输出 + Docker 容器检查 + Redis Stream 延迟测量 + `test_load_test.py` 33 测试全部通过 ✅ |
 | detector.py 枚举值大小写不一致 | `Regime` 值改为大写（TRENDING/RANGING/HIGH_VOLATILITY/UNKNOWN）|
 | config/indicators.yml 缺少 timeseries 段 | 已添加完整配置段 |
 | 6 个文件使用 logging 而非 structlog | trend.py / reconnect_guard.py / gap_filler.py / circuit_breaker.py / llm_client.py / prompt_versioner.py 已迁移 |
 | data/historical/ 缓存路径未加入 .gitignore | 已添加 |
+| backpressure.py 仍用 logging | 已迁移为 structlog |
+| 无主编排器 | 创建 `app/orchestrator.py`，支持 `--worker` 参数选择单/多 worker 模式 |
+| messaging/consumer.py 非可运行入口 | 重写为完整 CLI（`--stream`, `--group`, `--processor`）+ 动态模块加载 + 背压检查 + 优雅退出 |
+| logging_setup.py 未被引用 | `app/orchestrator.py` 和 `data/ws_client.py` 入口均调用 `setup_logging()` |
+| Docker 服务无编排入口 | docker-compose.yml 全部改用 `app.orchestrator --worker <name>` |
+| 无指标处理管道 | 创建 `indicators/processor.py`（滑动窗口缓存 + 5 类指标计算）|
+| 无制度处理管道 | 创建 `regime/processor.py`（ADX/BB 提取 + 制度检测 + 策略切换）|
+| 无 AI 引擎处理管道 | 创建 `ai_engine/processor.py`（PlanGenerator 串联 + 降级 FLAT）|
+| 无风控处理管道 | 创建 `risk_guardian/processor.py`（SignalArbiter 仲裁 + ArbitratedOrder 转换）|
 
 ---
 
@@ -132,7 +152,16 @@ _全部 P3 模块已完成 ✅_
 | 2025-06-01 | observability/decision_logger.py 完善写入逻辑（asyncpg 连接池 + INSERT/查询 + 降级） + plan_generator await 修复，19+10 测试全部通过 ✅ | ROLE_ANALYSIS |
 | 2025-06-01 | 技术债清理一批：indicators.yml 加 timeseries 段 · detector.py 枚举值大写统一 · .gitignore 加 data/historical/ | ROLE_INDICATORS |
 | 2025-06-01 | 技术债清理二批：6 个文件 logging → structlog 迁移（trend / reconnect_guard / gap_filler / circuit_breaker / llm_client / prompt_versioner）| ROLE_REVIEWER |
+| 2025-06-02 | **P0 基础架构完成**：app/orchestrator.py 主编排器 + messaging/consumer.py 通用消费者（含 CLI/动态模块加载/背压/优雅退出）+ backpressure.py structlog 修复 + data/ws_client.py __main__ 入口 + 4 层 processor 模块（indicators/regime/ai_engine/risk_guardian）+ docker-compose.yml 全部改用编排器 | ROLE_INFRA + ROLE_DATA + ROLE_REVIEWER |
+| 2025-06-02 | **Freqtrade force_exit API 集成完成**：创建 `freqtrade_client.py`（JWT 认证 + force_exit/health_check/get_open_trades/get_open_trade_count），熔断器触发时自动调用 force_exit_all()，processor.py 回撤 MONTHLY 等级时调用，docker-compose 添加端口映射 + 环境变量，286 测试全部通过 ✅ | ROLE_RISK |
+| 2025-06-02 | **系统全面审计完成**：实地审查 96+ 模块确认 ~100% 完成；5 项误标为 TODO stub 的模块实际已实现（alert_manager / factor_decay_monitor / dashboard.app / health_check / grafana dashboards），亦发现 scripts/backfill_data.py + cli_main.py 先前未记录；STATUS.md 同步更新 | ROLE_REVIEWER |
 ---
 
 
 *此文件每次迭代后由完成任务的 AI 角色输出 diff，人类合并*
+
+| Dockerfile 创建完成 | 多阶段构建 builder+runtime，非 root 用户，HEALTHCHECK |
+| requirements-dev.txt 创建完成 | pytest/httpx/mypy/ruff/pre-commit 等开发依赖 |
+| freqtrade config.json 增强完成 | AiSignalStrategy 集成、止损/止盈/风控规则 |
+| tests/test_integration.py 创建完成 | 端到端管线测试，6 测试通过 |
+| .github/workflows/ci.yml 创建完成 | 6 阶段 CI：lint → test → integration → coverage → docker → notify |

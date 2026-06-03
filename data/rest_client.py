@@ -94,7 +94,7 @@ def load_timeframes(config_path: str | Path | None = None) -> dict[str, Any]:
         logger.warning("时间周期配置文件未找到，使用默认值", path=str(cfg_path))
         return defaults
 
-    with open(cfg_path) as f:
+    with open(cfg_path, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
     if not cfg:

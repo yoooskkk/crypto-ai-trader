@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ page_title }}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #0d1117;
+            color: #c9d1d9;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+
+        /* Header */
+        header {
+            border-bottom: 1px solid #30363d;
+            padding-bottom: 16px;
+            margin-bottom: 24px;
+        }
+        header h1 { font-size: 24px; color: #58a6ff; }
+        header .subtitle { color: #8b949e; font-size: 14px; }
+
+        /* Grid */
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        /* Cards */
+        .card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 16px;
+        }
+        .card h2 {
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #8b949e;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #21262d;
+        }
+        .card .value {
+            font-size: 28px;
+            font-weight: 700;
+        }
+        .card .value.ok { color: #3fb950; }
+        .card .value.warn { color: #d29922; }
+        .card .value.error { color: #f85149; }
+        .card .meta {
+            font-size: 12px;
+            color: #8b949e;
+            margin-top: 4px;
+        }
+
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        th {
+            text-align: left;
+            padding: 8px 12px;
+            border-bottom: 2px solid #21262d;
+            color: #8b949e;
+            font-weight: 600;
+        }
+        td {
+            padding: 8px 12px;
+            border-bottom: 1px solid #21262d;
+        }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .badge.ok { background: #1b3a1d; color: #3fb950; }
+        .badge.warn { background: #3d2e00; color: #d29922; }
+        .badge.error { background: #3d1a1a; color: #f85149; }
+
+        /* Status indicators */
+        .status-dot {
+            display: inline-block;
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+        .status-dot.ok { background: #3fb950; }
+        .status-dot.warn { background: #d29922; }
+        .status-dot.error { background: #f85149; }
+
+        /* Footer */
+        footer {
+            border-top: 1px solid #30363d;
+            padding-top: 16px;
+            margin-top: 32px;
+            text-align: center;
+            color: #8b949e;
+            font-size: 12px;
+        }
+
+        @media (max-width: 768px) {
+            .grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <h1>{{ page_title }}</h1>
+            <div class="subtitle">
+                <span class="status-dot ok"></span>
+                {{ system.status }}
+                &middot; 运行 {{ "%.0f"|format(system.uptime_seconds / 3600) }}h
+                &middot; Python {{ system.python_version }}
+                &middot; <a href="/docs" style="color:#58a6ff;">API</a>
+            </div>
+        </header>
+
+        <!-- System Status Cards -->
+        <div class="grid">
+            <div class="card">
+                <h2>系统状态</h2>
+                <div class="value ok">{{ system.status|upper }}</div>
+                <div class="meta">运行 {{ "%.1f"|format(system.uptime_seconds / 86400) }} 天</div>
+            </div>
+            <div class="card">
+                <h2>风险控制</h2>
+                <div class="value">
+                    {% if risk.circuit_breaker.configured %}
+                    <span class="ok">已配置</span>
+                    {% else %}
+                    <span class="warn">未配置</span>
+                    {% endif %}
+                </div>
+                <div class="meta">
+                    回撤限制: {{ risk.drawdown_limit_pct }}% &middot;
+                    暴露度上限: {{ risk.max_exposure }}%
+                </div>
+            </div>
+            <div class="card">
+                <h2>因子衰减</h2>
+                <div class="value">
+                    {% set decaying_count = factors|selectattr("is_decaying")|list|length %}
+                    {% if decaying_count == 0 %}
+                    <span class="ok">正常</span>
+                    {% else %}
+                    <span class="warn">{{ decaying_count }} 个衰减</span>
+                    {% endif %}
+                </div>
+                <div class="meta">监控 {{ factors|length }} 个因子</div>
+            </div>
+        </div>
+
+        <!-- Factors Table -->
+        <div class="card" style="margin-bottom: 16px;">
+            <h2>因子衰减监控</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>因子</th>
+                        <th>IC 均值</th>
+                        <th>IC 斜率</th>
+                        <th>半衰期</th>
+                        <th>状态</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for f in factors %}
+                    <tr>
+                        <td>{{ f.factor }}</td>
+                        <td>{{ "%.4f"|format(f.ic_mean) }}</td>
+                        <td>
+                            {% if f.ic_slope < 0 %}
+                            <span style="color:#f85149;">{{ "%.4f"|format(f.ic_slope) }}</span>
+                            {% else %}
+                            <span style="color:#3fb950;">{{ "%.4f"|format(f.ic_slope) }}</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ f.half_life }}d</td>
+                        <td>
+                            {% if f.is_decaying %}
+                            <span class="badge warn">衰减中</span>
+                            {% else %}
+                            <span class="badge ok">正常</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Recent Signals Table -->
+        <div class="card">
+            <h2>最近信号</h2>
+            {% if signals %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>时间</th>
+                        <th>交易对</th>
+                        <th>方向</th>
+                        <th>置信度</th>
+                        <th>市场形态</th>
+                        <th>熔断状态</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for s in signals %}
+                    <tr>
+                        <td>{{ s.ts[:19] }}</td>
+                        <td>{{ s.symbol }}</td>
+                        <td>
+                            {% if s.direction == "LONG" %}
+                            <span style="color:#3fb950;">▲ LONG</span>
+                            {% elif s.direction == "SHORT" %}
+                            <span style="color:#f85149;">▼ SHORT</span>
+                            {% else %}
+                            <span>—</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ "%.1f"|format(s.confidence * 100) }}%</td>
+                        <td>{{ s.regime }}</td>
+                        <td>
+                            {% if s.breaker_state == "open" %}
+                            <span class="badge error">OPEN</span>
+                            {% elif s.breaker_state == "closed" %}
+                            <span class="badge ok">CLOSED</span>
+                            {% else %}
+                            <span class="badge warn">{{ s.breaker_state }}</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p style="color: #8b949e;">暂无信号数据（数据库不可用或为空）</p>
+            {% endif %}
+        </div>
+
+        <!-- Footer -->
+        <footer>
+            Crypto AI Trader Dashboard v1.0.0
+            &middot; <a href="/api/health" style="color:#58a6ff;">/api/health</a>
+            &middot; <a href="/api/signals" style="color:#58a6ff;">/api/signals</a>
+            &middot; <a href="/api/risk" style="color:#58a6ff;">/api/risk</a>
+            &middot; <a href="/api/factors" style="color:#58a6ff;">/api/factors</a>
+        </footer>
+    </div>
+</body>
+</html>

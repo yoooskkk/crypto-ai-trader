@@ -2,13 +2,22 @@ version: "3.9"
 
 services:
 
+  # ─── 基础服务 ───────────────────────────────────────────
+
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
     volumes:
       - ./infra/redis/redis.conf:/usr/local/etc/redis/redis.conf
       - redis_data:/data
     command: redis-server /usr/local/etc/redis/redis.conf
+    ports:
+      - "127.0.0.1:6379:6379"
     networks: [internal]
 
   timescaledb:
@@ -16,47 +25,159 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_PASSWORD_FILE: /run/secrets/db_password
-      POSTGRES_DB: trading
+      POSTGRES_DB: crypto_trader
     secrets: [db_password]
     volumes:
       - ./infra/timescaledb/init.sql:/docker-entrypoint-initdb.d/init.sql
       - tsdb_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
     networks: [internal]
 
   influxdb:
     image: influxdb:2.7-alpine
     restart: unless-stopped
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUXDB_USERNAME:-admin}
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUXDB_PASSWORD:-admin123}
+      DOCKER_INFLUXDB_INIT_ORG: ${INFLUXDB_ORG:-crypto_trader}
+      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUXDB_BUCKET:-factor_decay}
     volumes:
       - influx_data:/var/lib/influxdb2
+    ports:
+      - "127.0.0.1:8086:8086"
     networks: [internal]
 
+  # ─── 可观测性 ───────────────────────────────────────────
+
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./observability/prometheus/rules.yml:/etc/prometheus/rules.yml
+      - prom_data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    networks: [internal]
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_INSTALL_PLUGINS: ""
+    volumes:
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on: [prometheus]
+    networks: [internal]
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/alertmanager/config.yml"
+      - "--storage.path=/alertmanager"
+    volumes:
+      - ./infra/alertmanager/config.yml:/etc/alertmanager/config.yml
+      - alertmanager_data:/alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
+    depends_on: [prometheus]
+    networks: [internal]
+
+  # ─── Web 仪表板 ────────────────────────────────────────
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m uvicorn ui.dashboard.app:app --host 0.0.0.0 --port 8080
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DASHBOARD_HOST: "0.0.0.0"
+      DASHBOARD_PORT: "8080"
+      TIMESCALEDB_URL: postgresql://trader:${DB_PASSWORD:-trader}@timescaledb:5432/crypto_trader
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on: [timescaledb, redis, prometheus]
+    networks: [internal]
+
+  # ─── 因子衰减监控 ──────────────────────────────────────
+
+  factor-decay-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m observability.factor_decay_monitor --once
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      INFLUXDB_URL: http://influxdb:8086
+      DECAY_CHECK_INTERVAL: "60"
+    depends_on: [influxdb]
+    networks: [internal]
+
+  # ─── 健康检查 ──────────────────────────────────────────
+
+  health-check:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m scripts.health_check --service redis --service timescaledb --json
+    restart: unless-stopped
+    env_file: .env
+    depends_on: [redis, timescaledb]
+    networks: [internal]
+
+  # ─── 主编排器 ───────────────────────────────────────────
+
   data-collector:
-    build: .
-    command: python -m data.ws_client
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m app.orchestrator --worker data
     restart: unless-stopped
     env_file: .env
     depends_on: [redis]
     networks: [internal, external]
 
   indicator-worker:
-    build: .
-    command: python -m messaging.consumer --group indicators
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m app.orchestrator --worker indicators
     restart: unless-stopped
     env_file: .env
     depends_on: [redis, timescaledb]
     networks: [internal]
 
   regime-worker:
-    build: .
-    command: python -m messaging.consumer --group regime
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m app.orchestrator --worker regime
     restart: unless-stopped
     env_file: .env
-    depends_on: [redis]
+    depends_on: [redis, timescaledb]
     networks: [internal]
 
   ai-engine:
-    build: .
-    command: python -m messaging.consumer --group ai_engine
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m app.orchestrator --worker ai_engine
     restart: unless-stopped
     env_file: .env
     secrets: [llm_api_key, binance_api_key]
@@ -64,16 +185,25 @@ services:
     networks: [internal]
 
   risk-guardian:
-    build: .
-    command: python -m risk_guardian.circuit_breaker
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m app.orchestrator --worker risk
     restart: unless-stopped
     env_file: .env
-    depends_on: [redis, ai-engine]
+    environment:
+      FREQTRADE_API_URL: http://freqtrade:8080
+      FREQTRADE_USERNAME: ${FREQTRADE_USERNAME:-Freqtrader}
+      FREQTRADE_PASSWORD: ${FREQTRADE_PASSWORD:-}
+      FREQTRADE_API_TIMEOUT: "10"
+    depends_on: [redis]
     networks: [internal]
 
   freqtrade:
     image: freqtradeorg/freqtrade:stable
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
     volumes:
       - ./freqtrade_strategies:/freqtrade/user_data/strategies
       - ./freqtrade_strategies/user_data:/freqtrade/user_data
@@ -81,23 +211,6 @@ services:
     secrets: [binance_api_key, binance_api_secret]
     depends_on: [risk-guardian]
     networks: [internal, external]
-
-  prometheus:
-    image: prom/prometheus:latest
-    restart: unless-stopped
-    volumes:
-      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-      - ./observability/prometheus/rules.yml:/etc/prometheus/rules.yml
-      - prom_data:/prometheus
-    networks: [internal]
-
-  grafana:
-    image: grafana/grafana:latest
-    restart: unless-stopped
-    volumes:
-      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards
-      - grafana_data:/var/lib/grafana
-    networks: [internal]
 
 secrets:
   db_password:
@@ -120,3 +233,4 @@ volumes:
   influx_data:
   prom_data:
   grafana_data:
+  alertmanager_data:

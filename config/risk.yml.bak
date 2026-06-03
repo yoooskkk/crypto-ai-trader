@@ -1,0 +1,18 @@
+circuit_breaker:
+  cool_down_hours: 4
+  equity_floor_usd: 0
+  max_consecutive_losses: 5
+  max_daily_drawdown_pct: 5.0
+drawdown_limits:
+  daily_max_pct: 5.0
+  monthly_max_pct: 15.0
+  recovery_half_days: 3
+  weekly_max_pct: 10.0
+exposure:
+  max_correlated_pairs: 3
+  max_single_position_pct: 15.0
+  max_total_pct: 40.0
+signal:
+  ai_override_freqtrade: false
+  min_confidence: 0.7
+  require_regime_match: true

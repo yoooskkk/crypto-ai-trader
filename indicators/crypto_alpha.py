@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -28,8 +30,22 @@ CONFIG_PATH = _CONFIG_DIR / "indicators.yml"
 
 # ─── Binance Futures API 常量 ────────────────────────────────
 
-_BINANCE_FAPI_BASE = "https://fapi.binance.com"
-_BINANCE_FDATA_BASE = "https://fapi.binance.com"  # 历史数据同域
+# 通过环境变量可覆盖，用于代理/镜像/测试网
+_BINANCE_FAPI_BASE = (
+    os.environ.get("BINANCE_FAPI_BASE")
+    or os.environ.get("CRYPTO_ALPHA_BINANCE_URL")
+    or "https://fapi.binance.com"
+)
+_BINANCE_FDATA_BASE = _BINANCE_FAPI_BASE  # 历史数据同域
+
+# HTTP/HTTPS 代理（生产环境需要时设置）
+_HTTP_PROXY = os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy") or ""
+_HTTPS_PROXY = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or ""
+
+# API 请求超时与重试
+_DEFAULT_TIMEOUT_S = int(os.environ.get("CRYPTO_ALPHA_TIMEOUT", "15"))
+_DEFAULT_RETRY_COUNT = int(os.environ.get("CRYPTO_ALPHA_RETRY", "3"))
+_DEFAULT_RETRY_DELAY_S = float(os.environ.get("CRYPTO_ALPHA_RETRY_DELAY", "1.0"))
 
 
 # ─── 配置读取 ────────────────────────────────────────────────
@@ -39,11 +55,14 @@ def load_crypto_alpha_params(config_path: str | Path | None = None) -> dict[str,
     """
     从 config/indicators.yml 的 crypto_alpha 段读取参数。
 
-    返回结构:
+        返回结构:
     {
         "funding_rate_source": "binance",
-        "oi_delta_period": 24,      # 小时
-        "cvd_lookback": 100         # K 线根数
+        "oi_delta_period": 24,         # 小时
+        "cvd_lookback": 100,           # K 线根数
+        "timeout": 15,                 # API 请求超时秒数
+        "retry_count": 3,              # 失败重试次数
+        "proxy": "",                  # HTTP 代理 URL
     }
     """
     cfg_path = Path(config_path) if config_path else CONFIG_PATH
@@ -54,9 +73,12 @@ def load_crypto_alpha_params(config_path: str | Path | None = None) -> dict[str,
             "funding_rate_source": "binance",
             "oi_delta_period": 24,
             "cvd_lookback": 100,
+            "timeout": _DEFAULT_TIMEOUT_S,
+            "retry_count": _DEFAULT_RETRY_COUNT,
+            "proxy": "",
         }
 
-    with open(cfg_path) as f:
+    with open(cfg_path, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
     ca_cfg = cfg.get("crypto_alpha", {})
@@ -64,6 +86,9 @@ def load_crypto_alpha_params(config_path: str | Path | None = None) -> dict[str,
         "funding_rate_source": "binance",
         "oi_delta_period": 24,
         "cvd_lookback": 100,
+        "timeout": _DEFAULT_TIMEOUT_S,
+        "retry_count": _DEFAULT_RETRY_COUNT,
+        "proxy": "",
     }
 
     for key in defaults:
@@ -95,6 +120,12 @@ class BinanceFuturesPublicClient:
     Binance USD-M Futures 公开数据客户端。
     仅使用公开 REST 端点，无需 API Key。
 
+    支持:
+    - 环境变量覆盖 API URL（BINANCE_FAPI_BASE / CRYPTO_ALPHA_BINANCE_URL）
+    - 代理配置（HTTP_PROXY / HTTPS_PROXY 环境变量）
+    - 可配置超时与重试
+    - 自动 retry
+
     端点文档:
     - 资金费率: GET /fapi/v1/premiumIndex
     - 未平仓量: GET /fapi/v1/openInterest
@@ -102,18 +133,47 @@ class BinanceFuturesPublicClient:
     速率限制: 2400 次/分钟（公开端点）
     """
 
-    def __init__(self, base_url: str = _BINANCE_FAPI_BASE, timeout: int = 10):
-        self._base_url = base_url
+    def __init__(
+        self,
+        base_url: str = _BINANCE_FAPI_BASE,
+        timeout: int = _DEFAULT_TIMEOUT_S,
+        retry_count: int = _DEFAULT_RETRY_COUNT,
+        retry_delay: float = _DEFAULT_RETRY_DELAY_S,
+        proxy: str | None = None,
+    ):
+        """
+        初始化客户端。
+
+        参数:
+            base_url: Binance API 基础 URL（默认 https://fapi.binance.com）
+            timeout: 单次请求超时秒数
+            retry_count: 失败重试次数
+            retry_delay: 重试间隔秒数
+            proxy: 代理 URL，如 "http://proxy.example.com:8080"。
+                   若为 None，自动读取 HTTP_PROXY/HTTPS_PROXY 环境变量
+        """
+        self._base_url = base_url.rstrip("/")
         self._timeout = timeout
+        self._retry_count = retry_count
+        self._retry_delay = retry_delay
+        self._proxy = proxy or _HTTPS_PROXY or _HTTP_PROXY or None
         self._session = None
 
     async def _get_session(self):
         """惰性创建 aiohttp session（避免未使用时创建）"""
         if self._session is None or self._session.closed:
             import aiohttp
+
+            connector = None
+            if self._proxy:
+                logger.info("使用代理连接 Binance API", proxy=self._proxy)
+                # TCPConnector 可配合 proxy 参数使用
+                connector = aiohttp.TCPConnector(verify_ssl=True)
+
             self._session = aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=self._timeout),
                 headers={"Accept": "application/json"},
+                connector=connector,
             )
         return self._session
 
@@ -121,6 +181,84 @@ class BinanceFuturesPublicClient:
         """关闭 HTTP session"""
         if self._session and not self._session.closed:
             await self._session.close()
+
+    async def _request_with_retry(
+        self,
+        method: str,
+        url: str,
+        params: dict | None = None,
+    ) -> dict | list | None:
+        """
+        带重试机制的 HTTP 请求。
+
+        参数:
+            method: HTTP 方法（"GET" 等）
+            url: 完整请求 URL
+            params: URL 查询参数
+
+        返回:
+            解析后的 JSON 响应，全部失败返回 None
+        """
+        session = await self._get_session()
+
+        for attempt in range(1, self._retry_count + 1):
+            try:
+                kwargs: dict[str, Any] = {"params": params}
+                if self._proxy:
+                    kwargs["proxy"] = self._proxy
+
+                async with session.request(method, url, **kwargs) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+
+                    # 429 = 速率限制，504 = 网关超时，需要更长延迟
+                    if resp.status in (429, 503, 504):
+                        wait = self._retry_delay * (2 ** (attempt - 1)) * 2
+                        logger.warning(
+                            "Binance API 临时错误",
+                            status=resp.status,
+                            attempt=attempt,
+                            wait_s=round(wait, 1),
+                            url=url,
+                        )
+                        if attempt < self._retry_count:
+                            await asyncio.sleep(wait)
+                            continue
+                    else:
+                        logger.warning(
+                            "Binance API 返回错误",
+                            status=resp.status,
+                            attempt=attempt,
+                            url=url,
+                        )
+                        return None
+
+            except asyncio.TimeoutError:
+                wait = self._retry_delay * (2 ** (attempt - 1))
+                logger.warning(
+                    "Binance API 请求超时",
+                    attempt=attempt,
+                    wait_s=round(wait, 1),
+                    url=url,
+                )
+                if attempt < self._retry_count:
+                    await asyncio.sleep(wait)
+                    continue
+                return None
+
+            except Exception as e:
+                logger.error(
+                    "Binance API 请求异常",
+                    attempt=attempt,
+                    error=str(e),
+                    url=url,
+                )
+                if attempt < self._retry_count:
+                    await asyncio.sleep(self._retry_delay)
+                    continue
+                return None
+
+        return None
 
     async def get_premium_index(self, symbol: str) -> FundingRateResult | None:
         """
@@ -133,23 +271,20 @@ class BinanceFuturesPublicClient:
         返回:
             FundingRateResult，失败返回 None
         """
-        session = await self._get_session()
         url = f"{self._base_url}/fapi/v1/premiumIndex"
+        data = await self._request_with_retry("GET", url, params={"symbol": symbol})
+
+        if data is None:
+            return None
 
         try:
-            async with session.get(url, params={"symbol": symbol}) as resp:
-                if resp.status != 200:
-                    logger.warning("获取资金费率失败", symbol=symbol, status=resp.status)
-                    return None
-
-                data = await resp.json()
-                return FundingRateResult(
-                    funding_rate=float(data.get("lastFundingRate", 0)),
-                    mark_price=float(data.get("markPrice", 0)),
-                    next_funding_time=int(data.get("nextFundingTime", 0)),
-                )
-        except Exception as e:
-            logger.error("请求 premiumIndex 异常", symbol=symbol, error=str(e))
+            return FundingRateResult(
+                funding_rate=float(data.get("lastFundingRate", 0)),
+                mark_price=float(data.get("markPrice", 0)),
+                next_funding_time=int(data.get("nextFundingTime", 0)),
+            )
+        except (TypeError, ValueError) as e:
+            logger.error("解析资金费率响应失败", error=str(e), symbol=symbol)
             return None
 
     async def get_open_interest(self, symbol: str) -> OpenInterestResult | None:
@@ -163,22 +298,19 @@ class BinanceFuturesPublicClient:
         返回:
             OpenInterestResult，失败返回 None
         """
-        session = await self._get_session()
         url = f"{self._base_url}/fapi/v1/openInterest"
+        data = await self._request_with_retry("GET", url, params={"symbol": symbol})
+
+        if data is None:
+            return None
 
         try:
-            async with session.get(url, params={"symbol": symbol}) as resp:
-                if resp.status != 200:
-                    logger.warning("获取未平仓量失败", symbol=symbol, status=resp.status)
-                    return None
-
-                data = await resp.json()
-                return OpenInterestResult(
-                    open_interest=float(data.get("openInterest", 0)),
-                    time=int(data.get("time", 0)),
-                )
-        except Exception as e:
-            logger.error("请求 openInterest 异常", symbol=symbol, error=str(e))
+            return OpenInterestResult(
+                open_interest=float(data.get("openInterest", 0)),
+                time=int(data.get("time", 0)),
+            )
+        except (TypeError, ValueError) as e:
+            logger.error("解析 OI 响应失败", error=str(e), symbol=symbol)
             return None
 
     async def get_open_interest_history(
@@ -196,23 +328,22 @@ class BinanceFuturesPublicClient:
         返回:
             [{"symbol":"BTCUSDT","sumOpenInterest":"...","sumOpenInterestValue":"...","timestamp":...}]
         """
-        session = await self._get_session()
         url = f"{self._base_url}/futures/data/openInterestHist"
+        data = await self._request_with_retry("GET", url, params={
+            "symbol": symbol,
+            "period": period,
+            "limit": min(limit, 500),
+        })
 
-        try:
-            async with session.get(url, params={
-                "symbol": symbol,
-                "period": period,
-                "limit": min(limit, 500),
-            }) as resp:
-                if resp.status != 200:
-                    logger.warning("获取 OI 历史失败", symbol=symbol, status=resp.status)
-                    return None
-
-                return await resp.json()
-        except Exception as e:
-            logger.error("请求 openInterestHist 异常", symbol=symbol, error=str(e))
+        if data is None:
             return None
+
+        # openInterestHist 返回的是列表（不同于其他端点）
+        if isinstance(data, list):
+            return data
+
+        logger.warning("OI 历史返回格式异常", symbol=symbol, type=type(data).__name__)
+        return None
 
 
 # ─── 指标计算函数 ────────────────────────────────────────────
@@ -353,13 +484,21 @@ async def compute_crypto_alpha(
             logger.warning("DataFrame 缺少必要列 '%s'", col, column=col)
             return df
 
-    if not pd.api.types.is_numeric_dtype(df["close"]):
-        logger.warning("'close' 列必须为数值类型")
-        return df
+        if not pd.api.types.is_numeric_dtype(df["close"]):
+            logger.warning("'close' 列必须为数值类型")
+            return df
 
     own_client = False
     if binance_client is None:
-        binance_client = BinanceFuturesPublicClient()
+        # 从配置读取代理设置
+        proxy_url = cfg.get("proxy", "")
+        timeout = cfg.get("timeout", _DEFAULT_TIMEOUT_S)
+        retry_count = cfg.get("retry_count", _DEFAULT_RETRY_COUNT)
+        binance_client = BinanceFuturesPublicClient(
+            timeout=timeout,
+            retry_count=retry_count,
+            proxy=proxy_url or None,
+        )
         own_client = True
 
     try:
@@ -391,12 +530,12 @@ async def compute_crypto_alpha(
             if oi_delta is not None:
                 df["OI_DELTA_24h"] = oi_delta
             else:
-                logger.warning("OI delta 计算失败，使用 proxy", symbol=symbol)
+                logger.warning("OI delta 计算失败，使用 volume proxy", symbol=symbol)
                 # 降级：用 volume proxy
                 df[f"OI_DELTA_PROXY_{oi_period_hours}h"] = compute_oi_delta_simple(df, oi_period_hours)
                 df["OI_DELTA_24h"] = np.nan
         else:
-            logger.warning("当前 OI 获取失败，OI_DELTA_24h 使用 proxy", symbol=symbol)
+            logger.warning("当前 OI 获取失败，OI_DELTA_24h 使用 volume proxy", symbol=symbol)
             df[f"OI_DELTA_PROXY_{oi_period_hours}h"] = compute_oi_delta_simple(df, oi_period_hours)
             df["OI_DELTA_24h"] = np.nan
 

@@ -174,3 +174,39 @@ class BinanceWSClient:
             await self.producer.publish("raw_trade", msg)
         else:
             logger.debug("WS 未识别事件类型", event_type=event_type)
+
+
+# ─── CLI 入口 ─────────────────────────────────────────────────
+
+
+def main() -> None:
+    """CLI 入口：启动 WebSocket 客户端。"""
+    import os
+
+    from logging_setup import setup_logging
+
+    setup_logging(
+        level=os.getenv("LOG_LEVEL", "INFO"),
+        json_format=os.getenv("LOG_JSON", "").lower() in ("1", "true", "yes"),
+    )
+
+    symbols_str = os.getenv("SYMBOLS", "BTCUSDT,ETHUSDT")
+    symbols = [s.strip().upper() for s in symbols_str.split(",") if s.strip()]
+    interval = os.getenv("KLINE_INTERVAL", "1m")
+
+    logger.info(
+        "启动 WebSocket 客户端",
+        symbols=symbols,
+        interval=interval,
+        pid=os.getpid(),
+    )
+
+    client = BinanceWSClient(symbols=symbols, interval=interval)
+    try:
+        asyncio.run(client.run())
+    except KeyboardInterrupt:
+        logger.info("WS 客户端被用户中断")
+
+
+if __name__ == "__main__":
+    main()

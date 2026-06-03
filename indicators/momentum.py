@@ -52,7 +52,7 @@ def load_momentum_params(config_path: str | Path | None = None) -> dict[str, Any
             "stoch": {"k": 14, "d": 3, "smooth_k": 3},
         }
 
-    with open(cfg_path) as f:
+    with open(cfg_path, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
     momentum_cfg = cfg.get("momentum", {})

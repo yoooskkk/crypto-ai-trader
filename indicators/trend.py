@@ -40,7 +40,7 @@ def load_trend_params() -> dict[str, Any]:
     若配置文件缺失或格式不正确，将抛出 ValueError 或使用默认值。
     """
     try:
-        with open(CONFIG_PATH, "r") as f:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
             config = yaml.safe_load(f)
     except FileNotFoundError:
         logger.warning("配置文件 %s 未找到，使用默认参数", CONFIG_PATH)

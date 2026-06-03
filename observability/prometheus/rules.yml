@@ -1,0 +1,98 @@
+# Prometheus 告警规则 — Crypto AI Trader
+# 告警经由 AlertManager 推送至 Telegram / 钉钉
+#
+groups:
+  - name: crypto_trader_alerts
+    interval: 30s
+    rules:
+
+      # ── 系统级告警 ──────────────────────────────────────
+
+      - alert: TraderDown
+        expr: up{job="crypto-trader"} == 0
+        for: 60s
+        labels:
+          severity: critical
+        annotations:
+          summary: "交易进程已停止运行"
+          description: "{{ $labels.instance }} 已停止超过 60 秒"
+
+      - alert: HighMemoryUsage
+        expr: process_resident_memory_bytes{job="crypto-trader"} > 2e9
+        for: 120s
+        labels:
+          severity: warning
+        annotations:
+          summary: "内存使用超过 2GB"
+          description: "{{ $labels.instance }} 当前内存 {{ $value | humanize1024 }}"
+
+      # ── 熔断器告警 ──────────────────────────────────────
+
+      - alert: CircuitBreakerOpen
+        expr: circuit_breaker_state == 1
+        for: 0s
+        labels:
+          severity: critical
+        annotations:
+          summary: "熔断器已触发"
+          description: "风险控制已激活，所有开仓被拒绝"
+
+      # ── 因子衰减告警 ────────────────────────────────────
+
+      - alert: FactorDecayDetected
+        expr: factor_decay_is_decaying == 1
+        for: 60s
+        labels:
+          severity: warning
+        annotations:
+          summary: "因子 {{ $labels.factor }} 正在衰减"
+          description: "IC 均值低于阈值，因子失效风险"
+
+      - alert: FactorHalfLifeTooShort
+        expr: factor_decay_half_life < 5
+        for: 60s
+        labels:
+          severity: warning
+        annotations:
+          summary: "因子 {{ $labels.factor }} 半衰期过短"
+          description: "半衰期仅 {{ $value }} 天，建议重新评估"
+
+      # ── 风险控制告警 ────────────────────────────────────
+
+      - alert: TotalExposureLimitExceeded
+        expr: total_exposure_pct > 80
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: "总暴露度过高"
+          description: "当前暴露度 {{ $value }}%，超过 80% 警戒线"
+
+      - alert: DailyDrawdownBreach
+        expr: daily_drawdown_pct > 5
+        for: 0s
+        labels:
+          severity: critical
+        annotations:
+          summary: "日回撤超过 5%"
+          description: "当前日回撤 {{ $value }}%，超过限制"
+
+      # ── API 连通性告警 ──────────────────────────────────
+
+      - alert: FreqtradeAPIDown
+        expr: freqtrade_api_up == 0
+        for: 120s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Freqtrade API 不可用"
+          description: "已无法连接 Freqtrade API 超过 2 分钟"
+
+      - alert: HealthCheckFailed
+        expr: health_check_status == 0
+        for: 60s
+        labels:
+          severity: warning
+        annotations:
+          summary: "健康检查失败"
+          description: "系统健康检查检测到异常"
