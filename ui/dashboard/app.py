@@ -19,8 +19,10 @@ Web 仪表板 — FastAPI 应用
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+import sqlite3
 import time
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -89,14 +91,37 @@ def get_breaker_status() -> dict[str, Any]:
         return {"configured": False}
 
 
+def _fetch_signals_from_sqlite(limit: int = 10) -> list[dict[str, Any]]:
+    """从 SQLite 决策日志获取信号（轻量版）。"""
+    db_path = os.getenv("LITE_DB_PATH", "data/decisions.db")
+    if not os.path.exists(db_path):
+        return []
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute(
+            "SELECT * FROM decisions ORDER BY id DESC LIMIT ?", (limit,)
+        )
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.close()
+        return rows
+    except Exception as exc:
+        logger.warning("从 SQLite 获取信号失败", error=str(exc))
+        return []
+
+
 def get_latest_signals(limit: int = 10) -> list[dict[str, Any]]:
+    # 轻量版优先走 SQLite
+    lite_mode = os.getenv("LITE_MODE", "")
+    if lite_mode:
+        return _fetch_signals_from_sqlite(limit)
+
     decision_logger = _try_import("observability.decision_logger")
     if decision_logger is None:
         return []
 
     try:
         dl = decision_logger.DecisionLogger()
-        import asyncio
         rows = asyncio.run(dl.fetch_recent(limit=limit))
         result = []
         for row in rows:

@@ -116,6 +116,38 @@ services:
         reservations:
           memory: 256M
 
+  # ─── Web 仪表板（可选）──────────────────────────────────
+  # 轻量版 Dashboard：读取 SQLite 的决策日志
+  # 默认不启动，加 --profile dashboard 启用
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.lightweight
+    command: python -m uvicorn ui.dashboard.app:app --host 0.0.0.0 --port 8080
+    restart: unless-stopped
+    profiles:
+      - dashboard
+    environment:
+      DASHBOARD_HOST: "0.0.0.0"
+      DASHBOARD_PORT: "8080"
+      LITE_MODE: "true"
+      LITE_DB_PATH: /app/data/decisions.db
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./data:/app/data:ro
+    depends_on:
+      redis:
+        condition: service_started
+    networks: [internal]
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+        reservations:
+          memory: 64M
+
   # ─── Freqtrade 交易执行引擎 ─────────────────────────────────
   # 保留不动——成熟稳定，消费 trade_order Stream 执行实际下单
   freqtrade:

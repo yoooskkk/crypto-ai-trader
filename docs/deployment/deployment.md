@@ -31,73 +31,70 @@
 ## 1. 系统架构总览
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                     external network                      │
-│  ┌──────────┐  ┌──────────┐  ┌──────────────────────┐   │
-│  │ Binance  │  │ Crypto-  │  │     Freqtrade         │   │
-│  │ WebSocket│  │ Panic    │  │  (策略执行引擎)       │   │
-│  └────┬─────┘  └──────────┘  └──────────┬───────────┘   │
-│       │                                  │               │
-├───────┼──────────────────────────────────┼───────────────┤
-│       │           internal network        │               │
-│  ┌────▼───────────────────────────────────▼────┐         │
-│  │           data-collector (ws_client)         │         │
-│  │           ┌── Redis Stream ──┐              │         │
-│  │  raw_kline│                  │indicators    │         │
-│  ├───────────┴──► indicator-worker ◄───────────┤         │
-│  │              ┌── Redis Stream ──┐           │         │
-│  │  indicators  │                  │regime_sig │         │
-│  ├──────────────┴──► regime-worker ◄───────────┤         │
-│  │              ┌── Redis Stream ──┐           │         │
-│  │  regime_sig  │                  │ai_signal  │         │
-│  ├──────────────┴──► ai-engine ◄───────────────┤         │
-│  │              ┌── Redis Stream ──┐           │         │
-│  │  ai_signal   │                  │trade_order│         │
-│  ├──────────────┴──► risk-guardian ◄───────────┤         │
-│  │                         │                   │         │
-│  │                    force_exit API           │         │
-│  │                         │                   │         │
-│  │              ┌──────────▼────────┐          │         │
-│  │              │    Freqtrade      │          │         │
-│  │              │    (docker)       │          │         │
-│  └──────────────┴───────────────────┴──────────┘         │
-│                                                           │
-│  ┌── 基础服务 ────────────────────────────────────────┐  │
-│  │  Redis  │  TimescaleDB  │  InfluxDB  │  Prometheus  │  │
-│  │  Grafana│  AlertManager │  Dashboard │  HealthCheck │  │
-│  └──────────────────────────────────────────────────────┘  │
-└───────────────────────────────────────────────────────────┘
+```
+┌──────────────────────────────────────────┐
+│            pipeline-worker                │
+│  ┌───────────┐                           │
+│  │ Binance   │                           │
+│  │ WebSocket │──┐                        │
+│  └───────────┘  │                        │
+│                 ▼                        │
+│  ┌───────────────────────┐               │
+│  │ 指标计算 (indicators) │  ← 复用已有模块     │
+│  └───────────┬───────────┘               │
+│              │ Redis Stream               │
+│              ▼                           │
+│  ┌───────────────────────┐               │
+│  │ 制度识别 (regime)     │  ← 复用已有模块     │
+│  └───────────┬───────────┘               │
+│              │ Redis Stream               │
+│              ▼                           │
+│  ┌───────────────────────┐               │
+│  │ AI 引擎 (ai_engine)   │  ← 复用已有模块     │
+│  └───────────┬───────────┘               │
+│              │ Redis Stream               │
+│              ▼                           │
+│  ┌───────────────────────┐               │
+│  │ 风控审核 (risk)       │──► trade_order │
+│  └───────────┬───────────┘               │
+│              │ SQLite                     │
+│              ▼                            │
+│         decisions.db                      │
+└──────────────────────┬───────────────────┘
+         │
+         │ trade_order Stream
+         ▼
+┌──────────────┐    ┌──────────────┐
+│    Redis     │    │  Freqtrade   │
+│  (~30MB RAM) │    │  (docker)    │
+└──────────────┘    └──────────────┘
+```
 ```
 
 ### 数据流
 
-| 步骤 | Stream | 生产者 | 消费者 | 说明 |
-|:----:|:-------|:-------|:-------|:-----|
-| 1 | `raw_kline` | data-collector | indicator-worker | Binance WS → K 线 |
-| 2 | `indicators` | indicator-worker | regime-worker | 60+ 技术指标 |
-| 3 | `regime_signal` | regime-worker | ai-engine | 市场制度（趋势/震荡/高波动） |
-| 4 | `ai_signal` | ai-engine | risk-guardian | AI 生成的交易信号 |
-| 5 | `trade_order` | risk-guardian | Freqtrade | 最终交易指令 |
+| 步骤 | Stream | 生产者（同一容器内） | 消费者（同一容器内） | 说明 |
+|:----:|:-------|:-----------------|:------------------|:-----|
+| 1 | `raw_kline` | pipeline-worker 采集任务 | pipeline-worker 指标任务 | Binance WS → K 线 |
+| 2 | `indicators` | pipeline-worker 指标任务 | pipeline-worker 制度任务 | 60+ 技术指标 |
+| 3 | `regime_signal` | pipeline-worker 制度任务 | pipeline-worker AI 任务 | 市场制度 |
+| 4 | `ai_signal` | pipeline-worker AI 任务 | pipeline-worker 风控任务 | AI 交易信号 |
+| 5 | `trade_order` | pipeline-worker 风控任务 | **Freqtrade**（单独容器） | 最终交易指令 |
 
-### 容器清单（标准版 12 个 / 轻量版 2 个）
+### 容器清单
 
-轻量版容器清单见 [第 9 节](#9-低配硬件优化)。
+| 版本 | 容器数 | 适用场景 |
+|:-----|:------:|:---------|
+| **标准版**（`docker-compose.yml`） | 15 | 生产环境：≥ 8GB RAM，需 Grafana 面板 |
+| **轻量版**（`docker-compose.lightweight.yml`） | **3** | 低配环境：≥ 2GB RAM，最优选择 |
+
+#### 轻量版 3 容器
 
 | 容器 | 依赖 | 端口 | 说明 |
 |:-----|:-----|:----:|:-----|
 | **redis** | — | 6379 | 消息队列骨干 |
-| **timescaledb** | — | 5432 | 决策日志持久化 |
-| **influxdb** | — | 8086 | 因子衰减时序数据 |
-| **prometheus** | — | 9090 | 指标采集 |
-| **grafana** | prometheus | 3000 | 可视化面板 |
-| **alertmanager** | prometheus | 9093 | 告警路由 |
-| **dashboard** | timescaledb, redis | 8080 | Web 仪表板 |
-| **data-collector** | redis | — | Binance WS 数据采集 |
-| **indicator-worker** | redis, timescaledb | — | 指标计算 |
-| **regime-worker** | redis, timescaledb | — | 制度识别 |
-| **ai-engine** | redis | — | LLM 交易计划生成 |
-| **risk-guardian** | redis | — | 风控审核 |
-| **freqtrade** | risk-guardian | 8080 | 策略执行引擎（可选） |
+| **pipeline-worker** | redis | — | 合并 5 阶段：采集→指标→制度→AI→风控 + 通知脚本 |
+| **freqtrade** | pipeline-worker | 8081 | 交易执行引擎（AiSignalStrategy） |
 
 ---
 
@@ -135,20 +132,18 @@ mkdir -p secrets
 echo "sk-your-test-key" > secrets/llm_api_key.txt
 echo "your-binance-api-key" > secrets/binance_api_key.txt
 echo "your-binance-api-secret" > secrets/binance_api_secret.txt
-echo "trader" > secrets/db_password.txt
 
 # 3. 创建 .env（可选，不创建则全部使用默认值）
-# 注意：.env 不在版本控制中
 # cp docs/deployment/.env.example .env
 
-# 4. 启动全部服务
-docker compose up -d
+# 4. 启动轻量版（3 容器）
+docker compose -f docker-compose.lightweight.yml up -d
 
 # 5. 确认全部容器健康
-docker compose ps
+docker compose -f docker-compose.lightweight.yml ps
 
 # 6. 查看日志
-docker compose logs -f
+docker compose -f docker-compose.lightweight.yml logs -f
 ```
 
 首次启动时，Docker 会构建镜像（约 2-5 分钟）。后续启动为秒级。
@@ -156,16 +151,15 @@ docker compose logs -f
 ### 验证
 
 ```shell
-# 健康检查（各服务状态）
-docker compose exec health-check python -m scripts.health_check --json
+# 检查容器状态
+docker compose -f docker-compose.lightweight.yml ps
 
 # 检查 Redis Stream 是否正常运行
-docker compose exec redis redis-cli ping
+docker compose -f docker-compose.lightweight.yml exec redis redis-cli ping
 # 预期输出: PONG
 
-# 检查 Web 面板
-curl http://localhost:8080/health
-# 预期输出: {"status": "ok", ...}
+# 隐藏管线是否运转（看 raw_kline 是否在增长）
+docker compose -f docker-compose.lightweight.yml exec redis redis-cli XLEN raw_kline
 ```
 
 ---
@@ -257,30 +251,23 @@ anthropic=sk-ant-xxxxx
 
 #### 4.3.1 完整部署（生产）
 
+**标准版（15 容器，≥ 8GB RAM）：**
 ```shell
-# 1. 准备密钥文件（见 4.2 节）
-# 2. 准备 .env 文件
-# 3. 构建并启动
-docker compose build --no-cache    # 首次构建
-docker compose up -d               # 启动全部服务
+docker compose build --no-cache
+docker compose up -d
 
-# 4. 等待初始化完成（约 30 秒）
 sleep 30
 docker compose ps
 ```
 
-#### 4.3.2 部分部署（仅数据采集 + 指标）
-
+**轻量版（3 容器，≥ 2GB RAM）：**
 ```shell
-docker compose up -d redis timescaledb \
-  data-collector indicator-worker
-```
+docker compose -f docker-compose.lightweight.yml build
+docker compose -f docker-compose.lightweight.yml up -d
 
-#### 4.3.3 仅启动风控（已有外部数据源）
-
-```shell
-docker compose up -d redis \
-  regime-worker ai-engine risk-guardian
+# 首次需创建 data/ 目录写权限（仅限轻量版）
+mkdir -p data/historical
+chown -R 1000:1000 data
 ```
 
 ### 4.4 验证部署
@@ -289,109 +276,111 @@ docker compose up -d redis \
 
 ```shell
 # 容器状态
-docker compose ps
-
-# 各服务健康检查
-docker compose exec health-check python -m scripts.health_check \
-  --service redis --service timescaledb --json
+docker compose -f docker-compose.lightweight.yml ps
 ```
 
 #### 4.4.2 数据流验证
 
 ```shell
 # 查看 Redis Stream 长度（确认数据流动）
-docker compose exec redis redis-cli XLEN raw_kline
-docker compose exec redis redis-cli XLEN indicators
-docker compose exec redis redis-cli XLEN trade_order
+docker compose -f docker-compose.lightweight.yml exec redis redis-cli XLEN raw_kline
 
-# 查看最新消息
-docker compose exec redis redis-cli XREVRANGE raw_kline + - COUNT 1
+# 查看决策日志
+docker compose -f docker-compose.lightweight.yml exec pipeline-worker \
+  python3 -c "import sqlite3; c=sqlite3.connect('/app/data/decisions.db'); print(c.execute('SELECT count(*) FROM decisions').fetchone())"
 ```
 
 #### 4.4.3 日志查看
 
 ```shell
-# 全部日志（推荐 JSON 格式时用 jq 过滤）
-docker compose logs -f | grep "指标计算完成\|制度识别完成\|AI 信号生成完成\|风控审核通过"
+# 全部日志
+docker compose -f docker-compose.lightweight.yml logs -f
 
-# 单服务日志
-docker compose logs -f indicator-worker
-docker compose logs -f ai-engine
+# 只看 pipeline-worker
+docker compose -f docker-compose.lightweight.yml logs -f pipeline-worker
 
-# 错误日志
-docker compose logs | grep -i "error\|exception\|failed"
+# 只看 Freqtrade
+docker compose -f docker-compose.lightweight.yml logs -f freqtrade
+
+# 只看错误
+docker compose -f docker-compose.lightweight.yml logs | grep -i "error\|exception\|failed"
 ```
-
-#### 4.4.4 面板访问
-
-| 面板 | URL | 默认凭据 |
-|:-----|:----|:---------|
-| Web Dashboard | `http://localhost:8080` | 无认证 |
-| Grafana | `http://localhost:3000` | `admin` / `admin` |
-| Prometheus | `http://localhost:9090` | 无认证 |
-| AlertManager | `http://localhost:9093` | 无认证 |
 
 ---
 
-## 5. 服务详解
+## 5. 服务详解（轻量版）
 
-### 5.1 data-collector
+### 5.0 容器一览
+
+| 容器 | 必需 | 用途 |
+|:-----|:----:|:-----|
+| redis | ✅ | 消息队列骨干 |
+| pipeline-worker | ✅ | 全链路业务逻辑 + 通知 |
+| freqtrade | ✅ | 交易执行 |
+| dashboard | 🎨 可选 | Web 仪表板（端口 8080） |
+
+启用 Dashboard：
 
 ```shell
-# 调整监控币种和周期
-SYMBOLS=BTCUSDT,ETHUSDT,SOLUSDT    # 在 .env 中设置
-KLINE_INTERVAL=1h                   # Binance WebSocket 周期
+# 加 --profile dashboard 即可
+ docker compose -f docker-compose.lightweight.yml --profile dashboard up -d
 ```
 
-采集的 K 线数据通过 `raw_kline` Redis Stream 发布。不依赖数据库。
+Dashboard 读取 SQLite 决策日志，提供：
+- `/` — 系统概览面板
+- `/api/signals` — 最近交易信号 JSON
+- `/api/risk` — 风控状态 JSON
+- `/api/health` — 健康检查 JSON
 
-### 5.2 indicator-worker
+轻量版 3+1 个容器中，**pipeline-worker** 一个容器承担了原标准版 5 个 worker 的全部功能：
 
-从 `raw_kline` Stream 消费，维护滑动窗口缓存（最多 300 根 K 线），计算 60+ 技术指标。
+```
+pipeline-worker (同一个 Python 进程，5 个 asyncio 任务)
+├── 数据采集 (Binance WebSocket) ← 复用 data/ws_client.py
+├── 指标计算 (60+ indicators)    ← 复用 indicators/processor.py
+├── 制度识别 (ADX/BB/HMM)        ← 复用 regime/processor.py
+├── AI 引擎 (LLM PlanGenerator)  ← 复用 ai_engine/processor.py
+├── 风控审核 (熔断/回撤/仓位)     ← 复用 risk_guardian/processor.py
+├── 决策日志 (SQLite)            ← pipeline_worker.py 内置
+└── 通知脚本 (Telegram/钉钉)     ← 复用 observability/alert_manager.py
+```
 
-**预热时间**：每种 (symbol, timeframe) 组合需要至少 200 根 K 线才能开始产出指标。
+### 5.1 数据采集
 
-### 5.3 regime-worker
+```shell
+# 在 .env 中设置
+SYMBOLS=BTCUSDT,ETHUSDT
+KLINE_INTERVAL=1h
+```
 
-消费指标数据，使用 ADX + Bollinger Band 宽度规则识别市场制度：
+### 5.2 指标计算
+
+从 `raw_kline` Stream 消费，维护滑动窗口（最多 300 根 K 线），计算 60+ 技术指标。
+
+**预热时间**：每种 (symbol, timeframe) 需要至少 200 根 K 线才能产出指标。
+
+### 5.3 制度识别
 
 | 条件 | 制度 |
 |:-----|:-----|
 | BB 宽度 > 0.08 | `HIGH_VOLATILITY` |
 | ADX > 25 | `TRENDING` |
 | ADX < 20 且 BB 宽度 < 0.02 | `RANGING` |
-| 其他 | `UNKNOWN` |
 
-同时支持 HMM 模型（需离线训练），见 `scripts/train_hmm.py`。
+### 5.4 AI 引擎
 
-### 5.4 ai-engine
+接收制度信号 → 调用 PlanGenerator（LLM）→ 生成交易计划 → 发布 ai_signal。
 
-核心模块：接收制度信号 → 调用 PlanGenerator（含 LLM）→ 生成交易计划 → 发布 ai_signal。
+**前提**：`secrets/llm_api_key.txt` 存在且有效，容器可访问外部网络。
 
-**重要**：此服务需要访问外部 LLM API（OpenAI / Anthropic），需确保：
-- `secrets/llm_api_key.txt` 文件存在且有效
-- 容器可访问外部网络（`external` 网络已连接）
-
-### 5.5 risk-guardian
+### 5.5 风控审核
 
 风控审核链：熔断器 → 回撤检查 → 仓位计算 → 信号仲裁。
 
-如需与 Freqtrade 集成（熔断时强平），需配置：
-
-```yaml
-# .env
-FREQTRADE_API_URL=http://freqtrade:8080
-FREQTRADE_PASSWORD=your_freqtrade_password
-```
-
-### 5.6 Dashboard
-
-基于 FastAPI + Jinja2 的 Web 面板，提供：
-- `/api/health` — 系统健康状态
-- `/api/signals` — 最近交易信号
-- `/api/risk` — 风控状态
-- `/api/factors` — 因子衰减
-- `/api/status` — 全系统状态总览
+通过后同时执行 3 件事：
+1. 写入 `trade_order` Stream → Freqtrade 消费后下单
+2. 写入 SQLite 决策日志
+3. 推送 Telegram/钉钉通知
 
 ---
 
@@ -399,21 +388,23 @@ FREQTRADE_PASSWORD=your_freqtrade_password
 
 ### 6.1 配置文件清单
 
-| 文件 | 格式 | 说明 |
-|:-----|:-----|:-----|
-| `config/indicators.yml` | YAML | 指标参数（EMA 周期、RSI 周期等） |
-| `config/risk.yml` | YAML | 风控参数（熔断阈值、回撤限制、仓位限制） |
-| `config/llm_prompts/*.j2` | Jinja2 | LLM 提示词模板 |
-| `freqtrade_strategies/config.json` | JSON | Freqtrade 策略配置（需手动创建） |
-| `infra/prometheus/prometheus.yml` | YAML | Prometheus 抓取目标 |
-| `infra/alertmanager/config.yml` | YAML | 告警路由配置 |
+| 文件 | 格式 | 说明 | 轻量版是否适用 |
+|:-----|:-----|:-----|:-------------|
+| `config/indicators.yml` | YAML | 指标参数（EMA/RXI/BB 周期） | ✅ 适用 |
+| `config/risk.yml` | YAML | 风控参数（熔断/回撤/仓位） | ✅ 适用 |
+| `config/llm_prompts/*.j2` | Jinja2 | LLM 提示词模板 | ✅ 适用 |
+| `freqtrade_strategies/config.json` | JSON | Freqtrade 配置（需填 Binance Key） | ✅ 必需 |
+| `.env` | 键值对 | 环境变量（未创建则用代码默认值） | ⚠️ 建议创建 |
+| `infra/prometheus/prometheus.yml` | YAML | Prometheus 抓取目标 | ❌ 不适用 |
+| `infra/alertmanager/config.yml` | YAML | 告警路由配置 | ❌ 不适用 |
 
 ### 6.2 动态配置（热更新）
 
 以下配置支持运行时修改，**无需重启容器**：
 
-- `config/risk.yml` — 由 `regime-worker` 在制度切换时自动更新（修改会备份为 `.bak`）
+- `config/risk.yml` — 风控参数（修改后下次 AI 信号审核时生效）
 - `config/indicators.yml` — 指标参数（下次消费新 K 线时生效）
+- `.env` 中 `SYMBOLS` / `KLINE_INTERVAL` 等变量 — **需要重启容器**
 
 ### 6.3 HMM 模型
 
@@ -434,33 +425,24 @@ docker compose exec regime-worker python -m scripts.train_hmm \
 
 ## 7. 升级指南
 
-### 7.1 常规升级（无 schema 变更）
+### 7.1 常规升级
 
 ```shell
 # 1. 拉取最新代码
 git pull origin main
 
-# 2. 重新构建并启动
-docker compose build --no-cache
-docker compose up -d
+# 2. 重新构建并启动（轻量版）
+docker compose -f docker-compose.lightweight.yml build
+# 或用 --no-cache 强制全量构建：
+# docker compose -f docker-compose.lightweight.yml build --no-cache
+
+docker compose -f docker-compose.lightweight.yml up -d
 
 # 3. 验证
-docker compose ps
-```
+docker compose -f docker-compose.lightweight.yml ps
 
-### 7.2 含数据库 schema 变更
-
-```shell
-# 1. 备份数据库
-docker compose exec timescaledb pg_dump -U trader crypto_trader > backup_$(date +%Y%m%d).sql
-
-# 2. 更新代码并重启
-git pull origin main
-docker compose build --no-cache
-docker compose up -d
-
-# 3. 确认数据完整
-docker compose exec health-check python -m scripts.health_check --json
+# 4. 如果不放心权限，重建数据目录：
+mkdir -p data/historical && chown -R 1000:1000 data
 ```
 
 ### 7.3 LLM 提示词更新
@@ -482,29 +464,32 @@ vim config/llm_prompts/market_analysis.j2
 ### 8.1 Docker 回滚
 
 ```shell
-# 1. 回退到上一版本
-docker compose down
-git checkout HEAD~1
-docker compose build --no-cache
-docker compose up -d
+# 1. 停止轻量版
+docker compose -f docker-compose.lightweight.yml down
 
-# 2. 或使用特定版本标签（需提前打 tag）
-git checkout tags/v1.0.0
-docker compose up -d --build
+# 2. 回退代码版本
+git checkout HEAD~1
+
+# 3. 重新构建并启动
+docker compose -f docker-compose.lightweight.yml build
+docker compose -f docker-compose.lightweight.yml up -d
 ```
 
-### 8.2 数据库回滚
+### 8.2 数据回滚
 
 ```shell
-# 1. 停止使用数据库的服务
-docker compose stop dashboard indicator-worker regime-worker
+# 停掉 pipeline-worker
+# （data/ 目录的数据会保留在宿主机）
+docker compose -f docker-compose.lightweight.yml down
 
-# 2. 恢复备份
-cat backup_20250101.sql | docker compose exec -T timescaledb \
-  psql -U trader crypto_trader
+# SQLite 和 Parquet 数据在 ./data/ 目录下
+ls -la ./data/
 
-# 3. 重启
-docker compose up -d
+# 如需恢复旧的 decisions.db，重新复制即可
+cp ./data/decisions.db.bak ./data/decisions.db
+
+# 重新启动
+docker compose -f docker-compose.lightweight.yml up -d
 ```
 
 ### 8.3 HMM 模型回滚
@@ -775,25 +760,15 @@ services:
 
 ### B. 资源限制建议
 
-#### 标准版
+#### 轻量版（推荐）
 
 | 服务 | CPU | 内存 | 磁盘 |
 |:-----|:---:|:----:|:----:|
-| Redis | 0.5 | 512 MB | — |
-| TimescaleDB | 1.0 | 1 GB | 10 GB+ |
-| indicator-worker | 1.0 | 512 MB | — |
-| ai-engine | 1.0 | 1 GB | — |
-| Freqtrade | 0.5 | 256 MB | — |
-
-#### 轻量版
-
-| 服务 | CPU | 内存 | 磁盘 |
-|:-----|:---:|:----:|:----:|
-| Redis | 0.25 | 128 MB | — |
+| redis | 0.25 | 128 MB | — |
 | pipeline-worker | 0.75 | 512 MB | — |
-| dashboard (可选) | 0.25 | 128 MB | — |
+| freqtrade | 0.50 | 256 MB | — |
 
-在 `docker-compose.yml` 中设置：
+已在 `docker-compose.lightweight.yml` 中预设：
 
 ```yaml
 services:
@@ -804,6 +779,16 @@ services:
           cpus: '0.75'
           memory: 512M
 ```
+
+#### 标准版（≥ 8GB RAM）
+
+| 服务 | CPU | 内存 | 磁盘 |
+|:-----|:---:|:----:|:----:|
+| Redis | 0.5 | 512 MB | — |
+| TimescaleDB | 1.0 | 1 GB | 10 GB+ |
+| indicator-worker | 1.0 | 512 MB | — |
+| ai-engine | 1.0 | 1 GB | — |
+| Freqtrade | 0.5 | 256 MB | — |
 
 ### C. 切换回标准版
 
