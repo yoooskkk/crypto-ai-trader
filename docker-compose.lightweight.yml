@@ -105,8 +105,8 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - historical_data:/app/data/historical
-      - lite_db_data:/app/data
+      - ./data/historical:/app/data/historical
+      - ./data:/app/data
     networks: [internal, external]
     deploy:
       resources:
@@ -158,17 +158,4 @@ networks:
     internal: true
   external: {}
 
-# ─── 数据卷 ──────────────────────────────────────────────────
-volumes:
-  historical_data:
-    driver: local
-    driver_opts:
-      type: none
-      device: ${PWD}/data/historical
-      o: bind
-  lite_db_data:
-    driver: local
-    driver_opts:
-      type: none
-      device: ${PWD}/data
-      o: bind
+
