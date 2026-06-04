@@ -131,7 +131,7 @@ def compute_stddev(df: pd.DataFrame, period: int) -> pd.Series:
         logger.warning("DataFrame 缺少 'close' 列")
         return pd.Series(index=df.index, dtype=float, name=f"STDDEV_{period}")
 
-        stddev = df["close"].rolling(window=period, min_periods=period).std(ddof=0)
+    stddev = df["close"].rolling(window=period, min_periods=period).std(ddof=0)
     stddev.name = f"STDDEV_{period}"
     return stddev
 

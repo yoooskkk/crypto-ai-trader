@@ -133,7 +133,7 @@ def compute_roc(df: pd.DataFrame, period: int) -> pd.Series:
         logger.warning("DataFrame 缺少 'close' 列")
         return pd.Series(index=df.index, dtype=float, name=f"ROC_{period}")
 
-        roc = df["close"].pct_change(periods=period) * 100.0
+            roc = df["close"].pct_change(periods=period) * 100.0
     roc.name = f"ROC_{period}"
     return roc
 
