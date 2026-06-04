@@ -25,6 +25,42 @@ logger = structlog.get_logger(__name__)
 TIMEOUT = 30
 MAX_RETRIES = 3
 
+# ─── Docker Secrets 回退读取 ─────────────────────────────
+# Docker Compose secrets 以文件形式挂载在 /run/secrets/<name>
+# 当环境变量不存在时，尝试读取对应的 Docker secret 文件
+SECRETS_DIR = "/run/secrets"
+
+
+def _get_api_key(env_var: str, secret_name: str | None = None) -> str | None:
+    """
+    获取 API Key：优先从环境变量读取，失败则回退到 Docker secret 文件。
+
+    参数:
+        env_var: 环境变量名（如 "OPENAI_API_KEY"）
+        secret_name: Docker secret 文件名（如 "llm_api_key"），默认取 env_var 小写
+
+    返回:
+        API Key 字符串，或 None（均未找到）
+    """
+    # 1. 环境变量
+    key = os.getenv(env_var)
+    if key:
+        return key
+
+    # 2. Docker secret 文件回退
+    secret_file = secret_name or env_var.lower().replace("_", "_")
+    secret_path = os.path.join(SECRETS_DIR, secret_file)
+    try:
+        with open(secret_path) as f:
+            key = f.read().strip()
+        if key:
+            logger.debug("从 Docker secret 文件读取 API Key", path=secret_path)
+            return key
+    except (FileNotFoundError, PermissionError, IsADirectoryError):
+        pass
+
+    return None
+
 # ─── 后端配置 ────────────────────────────────────────────────
 
 BACKEND_CONFIG = {
@@ -100,7 +136,16 @@ class LLMClient:
         """OpenAI 原生 API。"""
         from openai import AsyncOpenAI
 
-        client = AsyncOpenAI(api_key=os.getenv(self._config["api_key_env"]))
+        api_key = _get_api_key(
+            self._config["api_key_env"],
+            secret_name="llm_api_key",
+        )
+        if not api_key:
+            raise ValueError(
+                f"API Key 未配置：请设置 {self._config['api_key_env']} 环境变量，"
+                f"或创建 Docker secret llm_api_key"
+            )
+        client = AsyncOpenAI(api_key=api_key)
         resp = await client.chat.completions.create(
             model=self._config["default_model"],
             messages=[
@@ -123,7 +168,15 @@ class LLMClient:
 
         base_url = os.getenv("LLM_API_BASE") or self._config["base_url"]
         model = os.getenv("LLM_MODEL") or self._config["default_model"]
-        api_key = os.getenv("LLM_API_KEY") or os.getenv(self._config["api_key_env"])
+        api_key = (
+            os.getenv("LLM_API_KEY")
+            or _get_api_key(self._config["api_key_env"])
+        )
+        if not api_key:
+            raise ValueError(
+                f"API Key 未配置：请设置 {self._config['api_key_env']} 环境变量，"
+                f"或创建 Docker secret llm_api_key"
+            )
 
         client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         resp = await client.chat.completions.create(
@@ -139,7 +192,12 @@ class LLMClient:
         """Anthropic API。"""
         from anthropic import AsyncAnthropic
 
-        client = AsyncAnthropic(api_key=os.getenv(self._config["api_key_env"]))
+        api_key = _get_api_key(self._config["api_key_env"])
+        if not api_key:
+            raise ValueError(
+                f"API Key 未配置：请设置 {self._config['api_key_env']} 环境变量"
+            )
+        client = AsyncAnthropic(api_key=api_key)
         resp = await client.messages.create(
             model=self._config["default_model"],
             max_tokens=2048,
