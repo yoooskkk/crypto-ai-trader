@@ -133,7 +133,7 @@ services:
       LITE_MODE: "true"
       LITE_DB_PATH: /app/data/decisions.db
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8082:8080"
     volumes:
       - ./data:/app/data:ro
     depends_on:
