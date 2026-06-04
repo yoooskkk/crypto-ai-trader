@@ -42,3 +42,7 @@ requests>=2.31
 python-dotenv>=1.0
 pyyaml>=6.0
 structlog>=24.1
+
+# Web 仪表板
+uvicorn[standard]>=0.29
+fastapi>=0.111
