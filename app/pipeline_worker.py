@@ -27,7 +27,7 @@ import os
 import signal
 import sys
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Coroutine
 
 import structlog
 
@@ -425,6 +425,10 @@ class PipelineWorker:
             self._kline_store = KlineStore()
         except ImportError:
             logger.info("KlineStore 不可用，历史 K 线存储跳过")
+        except PermissionError:
+            logger.warning("data/ 目录无写入权限，KlineStore 跳过")
+        except OSError as exc:
+            logger.warning("KlineStore 初始化失败", error=str(exc))
 
         # 3. 启动 5 个流水线阶段
         stage_tasks: list[tuple[str, Coroutine]] = [
